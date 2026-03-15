@@ -44,15 +44,41 @@ Other Nice controllers with IBT4N/BusT4 interface should work (Walky, Robus, Roa
 | LED3 | 22 | Overall status (active-low) |
 | Reset Button | 5 | — |
 
+### Wiring
+
+Connect a USB-UART adapter (3.3V) to the BiDi-WiFi module:
+
+| Adapter | Module | Notes |
+|---------|--------|-------|
+| TX | RX (GPIO 3 / RXD0) | |
+| RX | TX (GPIO 1 / TXD0) | |
+| GND | GND | |
+| 3.3V | 3.3V | Do NOT use 5V |
+| RTS | EN | Auto-reset (optional) |
+| DTR | GPIO 0 | Auto-boot mode (optional) |
+
+### Backup Factory Firmware
+
+**Always backup the original firmware before flashing!** This allows you to restore the Nice factory firmware if needed.
+
+```bash
+esptool.py --port COMx --baud 921600 read_flash 0x0 0x800000 bidiwifi-factory-backup.bin
+```
+
+This reads the full 8MB flash (bootloader, partitions, app, NVS, SPIFFS). Store the backup safely.
+
+To restore the factory firmware later:
+```bash
+esptool.py --port COMx --baud 921600 write_flash 0x0 bidiwifi-factory-backup.bin
+```
+
 ### Flashing
 
 1. **Remove** the BiDi-WiFi module from the gate control unit
-2. **Connect** a USB-UART adapter (3.3V):
-   - Adapter TX → Module RX (GPIO 3 / RXD0)
-   - Adapter RX → Module TX (GPIO 1 / TXD0)
-   - Adapter GND → Module GND
-   - Adapter 3.3V → Module 3.3V
-3. **Hold** the BOOT button (GPIO 0) while powering on to enter flash mode
+2. **Connect** the USB-UART adapter as described above
+3. **Enter flash mode:**
+   - If your adapter has RTS/DTR connected, `esptool` handles this automatically
+   - If not, manually: short **GPIO 0 to GND**, then briefly short **EN to GND** to reset, then release GPIO 0
 4. **Flash**: `esphome run nice-bidiwifi-gate.yaml --device COMx`
 5. **Reinstall** the module into the control unit's IBT4N connector
 
