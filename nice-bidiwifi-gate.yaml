@@ -1,0 +1,148 @@
+esphome:
+  name: nice-bidiwifi
+  friendly_name: "Nice Gate"
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+external_components:
+  - source: components
+
+logger:
+  level: DEBUG
+
+api:
+  encryption:
+    key: "YOUR_API_KEY"
+  reboot_timeout: 0s
+
+ota:
+  - platform: esphome
+    password: "YOUR_OTA_PASSWORD"
+
+wifi:
+  ssid: "YOUR_WIFI_SSID"
+  password: "YOUR_WIFI_PASSWORD"
+  ap:
+    password: "YOUR_FALLBACK_PASSWORD"
+
+captive_portal:
+
+web_server:
+  port: 80
+
+# Nice BiDi-WiFi hub (T4 bus communication)
+nice_bidiwifi:
+  id: my_gate
+  uart_rx_pin: 18
+  uart_tx_pin: 21
+  # hub_address: 0x5090  # default
+
+# Gate cover entity
+cover:
+  - platform: nice_bidiwifi
+    name: "Gate"
+    device_class: gate
+
+# Control buttons
+button:
+  - platform: nice_bidiwifi
+    name: "Step by Step"
+    command: sbs
+
+  - platform: nice_bidiwifi
+    name: "Partial Open 1"
+    command: partial_open_1
+
+  - platform: nice_bidiwifi
+    name: "Lock"
+    command: lock
+
+  - platform: nice_bidiwifi
+    name: "Unlock"
+    command: unlock
+
+  - platform: nice_bidiwifi
+    name: "Light Toggle"
+    command: light_toggle
+
+# Feature switches
+switch:
+  - platform: nice_bidiwifi
+    auto_close:
+      name: "Auto Close"
+    photo_close:
+      name: "Close After Photo"
+    always_close:
+      name: "Always Close"
+    standby:
+      name: "Standby Mode"
+    peak_mode:
+      name: "Peak Mode"
+    pre_flash:
+      name: "Pre-Flash Warning"
+    key_lock:
+      name: "Key Lock"
+
+# Numeric sensors
+sensor:
+  - platform: nice_bidiwifi
+    position:
+      name: "Gate Position"
+    encoder_value:
+      name: "Encoder Raw"
+    maneuver_count:
+      name: "Total Maneuvers"
+    maintenance_count:
+      name: "Maintenance Counter"
+
+# Info text sensors
+text_sensor:
+  - platform: nice_bidiwifi
+    product:
+      name: "Product"
+    firmware_version:
+      name: "Firmware"
+    hardware_version:
+      name: "Hardware"
+    gate_status:
+      name: "Status"
+    manufacturer:
+      name: "Manufacturer"
+    oxi_event:
+      name: "Remote Event"
+    last_stop_reason:
+      name: "Last Stop Reason"
+
+# Diagnostics binary sensors
+binary_sensor:
+  - platform: nice_bidiwifi
+    photocell:
+      name: "Photocell"
+    limit_switch_open:
+      name: "Limit Open"
+    limit_switch_close:
+      name: "Limit Close"
+    obstacle:
+      name: "Obstacle Detected"
+    locked:
+      name: "Gate Locked"
+
+# Configuration numbers
+number:
+  - platform: nice_bidiwifi
+    pause_time:
+      name: "Pause Time"
+    opening_force:
+      name: "Opening Force"
+    closing_force:
+      name: "Closing Force"
+    opening_speed:
+      name: "Opening Speed"
+    closing_speed:
+      name: "Closing Speed"
+
+# LED1 (R+G) = gate status, LED2 (R+G) = bus/connectivity, LED3 = WiFi status
+# All driven by the hub component (active-low, defaults match schematic)
