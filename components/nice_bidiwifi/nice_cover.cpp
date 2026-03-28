@@ -1,4 +1,5 @@
 #include "nice_cover.h"
+#include "t4_protocol.h"
 #include "esphome/core/log.h"
 
 namespace esphome {
@@ -14,11 +15,12 @@ void NiceCover::setup() {
 void NiceCover::dump_config() {
   LOG_COVER("", "Nice BiDi-WiFi Cover", this);
   ESP_LOGCONFIG(TAG, "  Invert open/close: %s", this->invert_open_close_ ? "YES" : "NO");
+  ESP_LOGCONFIG(TAG, "  Supports position: %s", this->supports_position_ ? "YES" : "NO");
 }
 
 cover::CoverTraits NiceCover::get_traits() {
   auto traits = cover::CoverTraits();
-  traits.set_supports_position(true);
+  traits.set_supports_position(this->supports_position_);
   traits.set_supports_stop(true);
   traits.set_is_assumed_state(false);
   return traits;
@@ -58,10 +60,21 @@ void NiceCover::control(const cover::CoverCall &call) {
 }
 
 void NiceCover::on_state_change_() {
-  uint8_t state = this->hub_->get_operation_state();
+  uint8_t raw_state = this->hub_->get_operation_state();
   float pos = this->hub_->get_position_percent();
-  if (this->invert_open_close_) {
+
+  // Encoder often stays at 0% on swing gates while the leaf is physically open. Home Assistant
+  // disables "Close" when position is 0, so align reported % with motor limit states.
+  if (raw_state == STA_OPENED) {
+    pos = this->invert_open_close_ ? cover::COVER_CLOSED : cover::COVER_OPEN;
+  } else if (raw_state == STA_CLOSED) {
+    pos = this->invert_open_close_ ? cover::COVER_OPEN : cover::COVER_CLOSED;
+  } else if (this->invert_open_close_) {
     pos = 1.0f - pos;
+  }
+
+  uint8_t state = raw_state;
+  if (this->invert_open_close_) {
     if (state == STA_OPENING) {
       state = STA_CLOSING;
     } else if (state == STA_CLOSING) {

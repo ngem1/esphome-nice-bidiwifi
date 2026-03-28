@@ -47,6 +47,8 @@ cover:
     device_class: gate
     # Set true if HA open/close matches the wrong physical direction (common on swing gates).
     # invert_open_close: true
+    # If HA still greys out Open or Close, set false (no slider; buttons use state only).
+    # supports_position: false
 
 # Control buttons
 button:

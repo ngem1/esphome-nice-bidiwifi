@@ -15,6 +15,7 @@ class NiceCover : public cover::Cover, public Component {
 
   void set_hub(NiceBidiWiFi *hub) { this->hub_ = hub; }
   void set_invert_open_close(bool invert) { this->invert_open_close_ = invert; }
+  void set_supports_position(bool sp) { this->supports_position_ = sp; }
 
   cover::CoverTraits get_traits() override;
   void control(const cover::CoverCall &call) override;
@@ -24,6 +25,7 @@ class NiceCover : public cover::Cover, public Component {
 
   NiceBidiWiFi *hub_{nullptr};
   bool invert_open_close_{false};
+  bool supports_position_{true};
   float last_published_pos_{-1.0f};
   cover::CoverOperation last_published_op_{cover::COVER_OPERATION_IDLE};
 
