@@ -45,6 +45,8 @@ cover:
   - platform: nice_bidiwifi
     name: "Gate"
     device_class: gate
+    # Set true if HA open/close matches the wrong physical direction (common on swing gates).
+    # invert_open_close: true
 
 # Control buttons
 button:

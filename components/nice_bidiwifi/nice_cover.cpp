@@ -13,6 +13,7 @@ void NiceCover::setup() {
 
 void NiceCover::dump_config() {
   LOG_COVER("", "Nice BiDi-WiFi Cover", this);
+  ESP_LOGCONFIG(TAG, "  Invert open/close: %s", this->invert_open_close_ ? "YES" : "NO");
 }
 
 cover::CoverTraits NiceCover::get_traits() {
@@ -30,24 +31,27 @@ void NiceCover::control(const cover::CoverCall &call) {
     return;
   }
 
+  auto cmd_open = this->invert_open_close_ ? CMD_CLOSE : CMD_OPEN;
+  auto cmd_close = this->invert_open_close_ ? CMD_OPEN : CMD_CLOSE;
+
   if (call.get_position().has_value()) {
     float target = *call.get_position();
 
     if (target >= cover::COVER_OPEN) {
       ESP_LOGD(TAG, "Open command");
-      this->hub_->send_control_cmd(CMD_OPEN);
+      this->hub_->send_control_cmd(cmd_open);
     } else if (target <= cover::COVER_CLOSED) {
       ESP_LOGD(TAG, "Close command");
-      this->hub_->send_control_cmd(CMD_CLOSE);
+      this->hub_->send_control_cmd(cmd_close);
     } else {
       // Intermediate position: move toward target
       float current = this->position;
       if (target > current) {
         ESP_LOGD(TAG, "Opening toward %.1f%%", target * 100.0f);
-        this->hub_->send_control_cmd(CMD_OPEN);
+        this->hub_->send_control_cmd(cmd_open);
       } else {
         ESP_LOGD(TAG, "Closing toward %.1f%%", target * 100.0f);
-        this->hub_->send_control_cmd(CMD_CLOSE);
+        this->hub_->send_control_cmd(cmd_close);
       }
     }
   }
@@ -56,6 +60,14 @@ void NiceCover::control(const cover::CoverCall &call) {
 void NiceCover::on_state_change_() {
   uint8_t state = this->hub_->get_operation_state();
   float pos = this->hub_->get_position_percent();
+  if (this->invert_open_close_) {
+    pos = 1.0f - pos;
+    if (state == STA_OPENING) {
+      state = STA_CLOSING;
+    } else if (state == STA_CLOSING) {
+      state = STA_OPENING;
+    }
+  }
 
   cover::CoverOperation op;
   switch (state) {

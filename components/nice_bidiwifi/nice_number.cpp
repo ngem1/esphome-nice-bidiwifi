@@ -21,8 +21,9 @@ void NiceNumber::dump_config() {
 void NiceNumber::control(float value) {
   ESP_LOGD(TAG, "Setting register 0x%02X to %.0f", this->register_id_, value);
   uint8_t byte_val = static_cast<uint8_t>(value);
-  // Send as 2-byte data: [prefix=0x01, value] — matches Nice app format
-  std::vector<uint8_t> data = {0x01, byte_val};
+  // Single-byte payload matches on/off registers (see nice_switch.cpp). A [0x01, value]
+  // pair caused some controllers to apply only the first byte, so GET always read 1.
+  std::vector<uint8_t> data = {byte_val};
   this->hub_->send_inf_cmd(DEV_CONTROLLER, this->register_id_, RUN_SET, 0x00, data);
   // Request current value to confirm
   this->hub_->send_get_register(this->register_id_);

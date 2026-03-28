@@ -8,10 +8,13 @@ DEPENDENCIES = ["nice_bidiwifi"]
 
 NiceCover = nice_bidiwifi_ns.class_("NiceCover", cover.Cover, cg.Component)
 
+CONF_INVERT_OPEN_CLOSE = "invert_open_close"
+
 CONFIG_SCHEMA = (
     cover.cover_schema(NiceCover)
     .extend({
         cv.GenerateID(CONF_NICE_BIDIWIFI_ID): cv.use_id(NiceBidiWiFi),
+        cv.Optional(CONF_INVERT_OPEN_CLOSE, default=False): cv.boolean,
     })
     .extend(cv.COMPONENT_SCHEMA)
 )
@@ -23,3 +26,4 @@ async def to_code(config):
     hub = await cg.get_variable(config[CONF_NICE_BIDIWIFI_ID])
     cg.add(hub.register_cover(var))
     cg.add(var.set_hub(hub))
+    cg.add(var.set_invert_open_close(config[CONF_INVERT_OPEN_CLOSE]))
