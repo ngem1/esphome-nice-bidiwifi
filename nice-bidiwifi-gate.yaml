@@ -67,6 +67,27 @@ button:
     name: "Step by Step"
     command: sbs
 
+  # Dual leaf (one CLB / IBT-style CU, M1+M2): host vs slave DEP commands.
+  # Rename in HA if your pedestrian leaf is wired the other way.
+  - platform: nice_bidiwifi
+    name: "Master leaf open"
+    command: master_open
+  - platform: nice_bidiwifi
+    name: "Master leaf close"
+    command: master_close
+  - platform: nice_bidiwifi
+    name: "Slave leaf open"
+    command: slave_open
+  - platform: nice_bidiwifi
+    name: "Slave leaf close"
+    command: slave_close
+  - platform: nice_bidiwifi
+    name: "Master leaf step"
+    command: master_sbs
+  - platform: nice_bidiwifi
+    name: "Slave leaf step"
+    command: slave_sbs
+
   - platform: nice_bidiwifi
     name: "Partial Open 1"
     command: partial_open_1
