@@ -654,6 +654,7 @@ void NiceBidiWiFi::parse_evt_packet_(const std::vector<uint8_t> &d) {
         if (data_len >= 1 && d.size() > 14) {
           this->standby_ = (d[14] != 0);
           ESP_LOGI(TAG, "Standby: %s", this->standby_ ? "ON" : "OFF");
+          this->notify_state_change_();
         }
         break;
 
@@ -661,6 +662,7 @@ void NiceBidiWiFi::parse_evt_packet_(const std::vector<uint8_t> &d) {
         if (data_len >= 1 && d.size() > 14) {
           this->preflash_ = (d[14] != 0);
           ESP_LOGI(TAG, "Pre-flash: %s", this->preflash_ ? "ON" : "OFF");
+          this->notify_state_change_();
         }
         break;
 
@@ -711,6 +713,7 @@ void NiceBidiWiFi::parse_evt_packet_(const std::vector<uint8_t> &d) {
         if (data_len >= 1 && d.size() > 14) {
           this->auto_close_ = (d[14] != 0);
           ESP_LOGI(TAG, "Auto close: %s", this->auto_close_ ? "ON" : "OFF");
+          this->notify_state_change_();
         }
         break;
 
@@ -718,6 +721,7 @@ void NiceBidiWiFi::parse_evt_packet_(const std::vector<uint8_t> &d) {
         if (data_len >= 1 && d.size() > 14) {
           this->photo_close_ = (d[14] != 0);
           ESP_LOGI(TAG, "Photo close: %s", this->photo_close_ ? "ON" : "OFF");
+          this->notify_state_change_();
         }
         break;
 
@@ -725,6 +729,7 @@ void NiceBidiWiFi::parse_evt_packet_(const std::vector<uint8_t> &d) {
         if (data_len >= 1 && d.size() > 14) {
           this->always_close_ = (d[14] != 0);
           ESP_LOGI(TAG, "Always close: %s", this->always_close_ ? "ON" : "OFF");
+          this->notify_state_change_();
         }
         break;
 
@@ -812,6 +817,7 @@ void NiceBidiWiFi::parse_evt_packet_(const std::vector<uint8_t> &d) {
           ESP_LOGI(TAG, "Key lock: %s", this->lock_state_ ? "LOCKED" : "UNLOCKED");
           if (this->locked_sensor_ != nullptr)
             this->locked_sensor_->publish_state(this->lock_state_);
+          this->notify_state_change_();
         }
         break;
 

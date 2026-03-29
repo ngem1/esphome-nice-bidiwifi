@@ -199,6 +199,7 @@ captive_portal:
 
 web_server:
   port: 80
+  version: 3
 
 # Nice BiDi-WiFi hub (T4 bus communication)
 nice_bidiwifi:

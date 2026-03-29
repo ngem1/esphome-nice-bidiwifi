@@ -18,13 +18,18 @@ void NiceSwitch::dump_config() {
 
 void NiceSwitch::write_state(bool state) {
   ESP_LOGD(TAG, "Setting register 0x%02X to %s", this->register_id_, state ? "ON" : "OFF");
+  this->write_ignore_start_ms_ = millis();
   std::vector<uint8_t> data = {state ? (uint8_t) 0x01 : (uint8_t) 0x00};
   this->hub_->send_inf_cmd(DEV_CONTROLLER, this->register_id_, RUN_SET, 0x00, data);
-  // Request current value to confirm
+  // Request current value to confirm (hub will notify on REG_* parse)
   this->hub_->send_get_register(this->register_id_);
+  // Optimistic UI until GET response updates hub state and triggers a fresh notify
+  this->publish_state(state);
 }
 
 void NiceSwitch::on_state_change_() {
+  if (this->write_ignore_start_ms_ != 0 && millis() - this->write_ignore_start_ms_ < 500)
+    return;
   bool current_state = false;
   switch (this->register_id_) {
     case REG_AUTOCLS:

@@ -22,6 +22,8 @@ class NiceSwitch : public switch_::Switch, public Component {
 
   NiceBidiWiFi *hub_{nullptr};
   uint8_t register_id_{0};
+  /// Ignore hub-driven on_state briefly after write_state (I/O/position notify can run before GET).
+  uint32_t write_ignore_start_ms_{0};
 };
 
 }  // namespace nice_bidiwifi
