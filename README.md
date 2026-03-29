@@ -23,6 +23,7 @@ The [Nice BiDi-WiFi](https://www.niceforyou.com/) module is an ESP32-WROOM-32E b
 | Controller | Type | Status |
 |-----------|------|--------|
 | **MC800** | Swing gate | Fully tested and working |
+| **CL201** | Swing gate | Tested and working |
 
 Other Nice controllers with IBT4N/BusT4 interface should work (Walky, Robus, Road 400, etc.) with device-specific adaptations built in:
 - **Walky (WLA)** — 1-byte position values (auto-detected)
