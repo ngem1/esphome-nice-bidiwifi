@@ -257,9 +257,13 @@ void NiceBidiWiFi::request_status_refresh_() {
   this->tx_queue_.push(t4_build_inf(this->device_address_, this->hub_address_,
                                      DEV_CONTROLLER, REG_STATUS, RUN_GET));
   if (this->maneuver_count_sensor_ != nullptr) {
-    uint8_t reg = this->maneuver_total_count_unsupported_ ? REG_NUM_MOVEMENTS : REG_TOTAL_COUNT;
-    this->tx_queue_.push(
-        t4_build_inf(this->device_address_, this->hub_address_, DEV_CONTROLLER, reg, RUN_GET));
+    if (this->maneuver_total_count_unsupported_ && this->maneuver_num_movements_unsupported_) {
+      // Neither B3 nor D4 — CL201-style; avoid polling a dead register every refresh
+    } else {
+      uint8_t reg = this->maneuver_total_count_unsupported_ ? REG_NUM_MOVEMENTS : REG_TOTAL_COUNT;
+      this->tx_queue_.push(
+          t4_build_inf(this->device_address_, this->hub_address_, DEV_CONTROLLER, reg, RUN_GET));
+    }
   }
 }
 
@@ -281,9 +285,9 @@ void NiceBidiWiFi::request_logical_inputs_() {
     this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_IN1, RUN_GET));
   if (this->input_2_sensor_ != nullptr)
     this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_IN2, RUN_GET));
-  if (this->input_3_sensor_ != nullptr)
+  if (this->input_3_sensor_ != nullptr && !this->input_3_unsupported_)
     this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_IN3, RUN_GET));
-  if (this->input_4_sensor_ != nullptr)
+  if (this->input_4_sensor_ != nullptr && !this->input_4_unsupported_)
     this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_IN4, RUN_GET));
 }
 
@@ -527,7 +531,16 @@ void NiceBidiWiFi::parse_packet_(const T4RxPacket &packet) {
       this->maneuver_total_count_unsupported_ = true;
       ESP_LOGI(TAG, "Register 0xB3 (total maneuvers) not supported — using 0xD4 reads for Total Maneuvers");
     } else if (err_reg == REG_NUM_MOVEMENTS) {
-      ESP_LOGD(TAG, "Register 0xD4 (maneuver count) not supported on this controller");
+      this->maneuver_num_movements_unsupported_ = true;
+      ESP_LOGD(TAG, "Register 0xD4 (maneuver count) not supported — disabling maneuver refresh polls");
+    } else if (err_reg == REG_IN3) {
+      this->input_3_unsupported_ = true;
+      ESP_LOGD(TAG, "Register 0x73 (Input 3) not supported — stopping IN3 polls");
+    } else if (err_reg == REG_IN4) {
+      this->input_4_unsupported_ = true;
+      ESP_LOGD(TAG, "Register 0x74 (Input 4) not supported — stopping IN4 polls");
+    } else if (err_reg == REG_PH_CLS_MODE) {
+      ESP_LOGD(TAG, "Register 0x86 (Photo Close Mode) not supported on this controller");
     } else {
       ESP_LOGW(TAG, "Error: device=0x%02X register=0x%02X (%s) not supported", err_dev, err_reg,
                t4_register_name(err_reg));

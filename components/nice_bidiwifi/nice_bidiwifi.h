@@ -191,6 +191,11 @@ class NiceBidiWiFi : public Component {
   uint32_t maintenance_count_{0};
   /// Set when REG_TOTAL_COUNT (0xB3) returns 0xFD — refresh uses REG_NUM_MOVEMENTS (0xD4) instead.
   bool maneuver_total_count_unsupported_{false};
+  /// Set when REG_NUM_MOVEMENTS (0xD4) also returns 0xFD — skip maneuver refresh GETs.
+  bool maneuver_num_movements_unsupported_{false};
+  /// Logical inputs not exposed on some boards (e.g. CL201): stop polling after first NACK.
+  bool input_3_unsupported_{false};
+  bool input_4_unsupported_{false};
   // Timing
   uint32_t last_discovery_time_{0};
   uint32_t last_position_poll_time_{0};
