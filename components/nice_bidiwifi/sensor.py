@@ -21,6 +21,9 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional("maintenance_count"): sensor.sensor_schema(
             accuracy_decimals=0,
         ),
+        cv.Optional("maintenance_threshold"): sensor.sensor_schema(
+            accuracy_decimals=0,
+        ),
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
@@ -30,6 +33,7 @@ SENSOR_KEYS = {
     "encoder_value": "set_encoder_sensor",
     "maneuver_count": "set_maneuver_count_sensor",
     "maintenance_count": "set_maintenance_count_sensor",
+    "maintenance_threshold": "set_maintenance_threshold_sensor",
 }
 
 

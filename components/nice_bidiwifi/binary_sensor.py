@@ -13,6 +13,10 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional("limit_switch_close"): binary_sensor.binary_sensor_schema(),
         cv.Optional("obstacle"): binary_sensor.binary_sensor_schema(),
         cv.Optional("locked"): binary_sensor.binary_sensor_schema(),
+        cv.Optional("input_1"): binary_sensor.binary_sensor_schema(),
+        cv.Optional("input_2"): binary_sensor.binary_sensor_schema(),
+        cv.Optional("input_3"): binary_sensor.binary_sensor_schema(),
+        cv.Optional("input_4"): binary_sensor.binary_sensor_schema(),
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
@@ -22,6 +26,10 @@ BINARY_SENSOR_KEYS = {
     "limit_switch_close": "set_limit_close_sensor",
     "obstacle": "set_obstacle_sensor",
     "locked": "set_locked_sensor",
+    "input_1": "set_input_1_sensor",
+    "input_2": "set_input_2_sensor",
+    "input_3": "set_input_3_sensor",
+    "input_4": "set_input_4_sensor",
 }
 
 

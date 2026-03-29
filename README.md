@@ -7,7 +7,7 @@ An [ESPHome](https://esphome.io/) external component that replaces the factory f
 - **Full gate control** — Open, Close, Stop, Partial Open, Lock/Unlock, Light Toggle
 - **Real-time position tracking** — Encoder-based position with percentage display
 - **Configurable parameters** — Force, Pause Time via Home Assistant number entities
-- **Feature switches** — Auto Close, Photo Close, Always Close, Pre-Flash, Key Lock
+- **Feature switches** — Auto Close, Photo Close, Always Close, Standby, Pre-Flash, Key Lock
 - **Diagnostics** — Photocell, limit switches, obstacle detection, stop reason, maneuver counters
 - **Status LEDs** — Gate state (LED1), bus connectivity (LED2), overall status (LED3)
 - **OTA updates** — Wireless firmware updates via ESPHome
@@ -28,6 +28,37 @@ Other Nice controllers with IBT4N/BusT4 interface should work (Walky, Robus, Roa
 - **Walky (WLA)** — 1-byte position values (auto-detected)
 - **Robus (ROB)** — Position polling disabled during movement (auto-detected)
 - **Road 400** — Alternate status codes 0x83/0x84 handled
+
+## How position tracking works
+
+The hub layers several mechanisms so the cover and percentage sensors stay useful even when encoders are partial or noisy. The idea matches what other Nice Bus-T4 ESPHome projects document—for example [makstech/esphome-BusT4](https://github.com/makstech/esphome-BusT4)—with behaviour tuned to this codebase.
+
+### 1. Encoder position (primary when fresh)
+
+When the controller returns current/encoder position, it updates the cover and optional encoder sensor. While the gate is **opening** or **closing**, the hub polls encoder/current position on an interval (default **500 ms**, configurable with **`position_report_interval`** on the cover; values are clamped between 50 ms and 60 s).
+
+Encoder-derived position is preferred only when a reading arrived within the last **2 seconds**; if it is older, time-based estimation may be used instead.
+
+**Robus** units are detected from the product name; for those, position is **not** polled during movement because the drive does not handle it reliably.
+
+**Walky** controllers use **1-byte** position values; most others use two-byte values (and some use a three-byte layout).
+
+### 2. Time-based estimation (fallback)
+
+If encoder data is unavailable or stale during a move, position is estimated from elapsed time and **learned** open/close durations:
+
+- Durations are captured on **complete** movements (e.g. fully closed → fully open) and **persisted** across reboots when **`auto_learn_timing`** is true (default). With **`auto_learn_timing: false`**, flash is not updated and **`open_duration`** / **`close_duration`** in YAML define the timings used for time-based estimation.
+- Before the first successful learn (or when a direction has no stored value yet), **`open_duration`** and **`close_duration`** act as fallbacks (defaults **20 s** each, same idea as [esphome-BusT4](https://github.com/makstech/esphome-BusT4)).
+- Only durations between about **3 seconds** and **5 minutes** are accepted; interrupted cycles do **not** update stored timings.
+- If a new measurement differs from the stored duration by more than about **10%**, the stored value is updated (adaptive re-learning).
+
+### 3. Limit switch confirmation
+
+Diagnostic **I/O** (`REG_DIAG_IO`) is read after relevant status changes. Limit-switch bits are used to snap position to **fully open** or **fully closed** when the automation status matches (`STA_OPENED` / `STA_CLOSED`), which corrects small drift in the time-based estimate.
+
+### 4. Periodic status refresh
+
+Roughly every **15 seconds** the hub requests **status** again (and maneuver count, using `REG_TOTAL_COUNT` or `REG_NUM_MOVEMENTS` depending on the controller). That recovers from missed packets and picks up changes from remotes or the panel.
 
 ## Hardware Setup
 
@@ -180,6 +211,11 @@ cover:
   - platform: nice_bidiwifi
     name: "Gate"
     device_class: gate
+    id: gate
+    auto_learn_timing: true
+    open_duration: 20s
+    close_duration: 20s
+    position_report_interval: 500ms
 
 # Control buttons
 button:
@@ -212,6 +248,8 @@ switch:
       name: "Close After Photo"
     always_close:
       name: "Always Close"
+    standby:
+      name: "Standby"
     pre_flash:
       name: "Pre-Flash Warning"
     key_lock:
@@ -270,6 +308,17 @@ number:
       name: "Closing Force"
 ```
 
+### Cover platform options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `auto_learn_timing` | `true` | Learn open/close duration from completed moves and persist to flash. If `false`, YAML `open_duration` / `close_duration` are used and preferences are not updated from the bus. |
+| `open_duration` | `20s` | Initial/fallback duration for time-based position (clamped to the same 3 s–5 min band as learning). |
+| `close_duration` | `20s` | Same for closing. |
+| `position_report_interval` | `500ms` | How often to request encoder/current position while the gate is moving (hub clamps to 50 ms–60 s). |
+| `invert_open_close` | `false` | Swap open/close commands and reported position when the physical install is reversed. |
+| `supports_position` | `true` | Expose a position slider in Home Assistant; set `false` if the encoder is unusable and you rely on open/closed state only. |
+
 ### Available Button Commands
 
 | Command | Description |
@@ -299,6 +348,33 @@ nice_bidiwifi:
   led2_red_pin: 27         # LED2 red (default: 27)
   led2_green_pin: 26       # LED2 green (default: 26)
   led3_pin: 22             # LED3 (default: 22)
+```
+
+### Number ranges (force, speed, pause, …)
+
+Opening/closing **force** (`0x4A` / `0x4B`) and **speed** (`0x42` / `0x43`) are exposed as **1–100** with unit **%**, which matches the usual Nice Bus-T4 / DMP convention on many controllers. **This repo does not embed model-specific tables** (e.g. CL201): your drive may accept the full range, clamp silently, or **NACK** (`0xFD`) if a value is illegal. For authoritative limits, use the **official Nice programming/installation guide for your board**.
+
+If you need to try values outside the number entities, or to replay a capture from logs, use **`send_raw_cmd`** on the hub (see below).
+
+### Debugging: raw hex on the bus
+
+The hub exposes **`send_raw_cmd(std::string)`**, same idea as [makstech/esphome-BusT4](https://github.com/makstech/esphome-BusT4): pass a hex string (`"55.0C.00.FF..."` or `"550C00FF..."`; spaces, dots, colons, and newlines are ignored). An **odd** digit count or invalid characters are rejected (nothing is sent).
+
+Use a **template `text`** entity in Home Assistant and call **`id(<your_hub_id>).send_raw_cmd(x)`** (the hub id from `nice_bidiwifi:`, not the cover id). Example:
+
+```yaml
+text:
+  - platform: template
+    name: "Raw T4 hex"
+    id: raw_t4_hex
+    optimistic: true
+    mode: text
+    on_value:
+      then:
+        - lambda: |-
+            if (!x.empty()) {
+              id(my_gate).send_raw_cmd(x);
+            }
 ```
 
 ## T4 Bus Protocol

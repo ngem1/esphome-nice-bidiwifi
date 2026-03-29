@@ -1,11 +1,28 @@
 #include "nice_bidiwifi.h"
+#include "nice_cover.h"
 #include "nice_number.h"
+#include "esphome/core/helpers.h"
+#include <algorithm>
 #include "driver/gpio.h"
 
 namespace esphome {
 namespace nice_bidiwifi {
 
 static const char *const TAG = "nice_bidiwifi";
+
+namespace {
+
+uint32_t clamp_learned_duration_ms(uint32_t ms) {
+  if (ms == 0)
+    return 0;
+  if (ms < T4_MIN_LEARNED_DURATION)
+    return T4_MIN_LEARNED_DURATION;
+  if (ms > T4_MAX_LEARNED_DURATION)
+    return T4_MAX_LEARNED_DURATION;
+  return ms;
+}
+
+}  // namespace
 
 void NiceBidiWiFi::setup() {
   ESP_LOGI(TAG, "Setting up Nice BiDi-WiFi hub...");
@@ -67,7 +84,7 @@ void NiceBidiWiFi::loop() {
   // 5. Position polling during movement (skip for Robus — breaks if polled while moving)
   if (this->device_found_ && this->init_complete_ && !this->is_robus_ &&
       (this->operation_state_ == STA_OPENING || this->operation_state_ == STA_CLOSING) &&
-      (now - this->last_position_poll_time_ >= T4_POSITION_POLL_MS)) {
+      (now - this->last_position_poll_time_ >= this->effective_position_poll_ms_())) {
     this->request_position_();
     this->last_position_poll_time_ = now;
   }
@@ -79,10 +96,11 @@ void NiceBidiWiFi::loop() {
     this->last_status_refresh_time_ = now;
   }
 
-  // 7. Periodic I/O state polling (limit switches, photocell)
+  // 7. Periodic I/O state polling (limit switches, photocell, logical inputs)
   if (this->device_found_ && this->init_complete_ &&
       (now - this->last_io_poll_time_ >= T4_IO_POLL_MS)) {
     this->request_io_state_();
+    this->request_logical_inputs_();
     this->last_io_poll_time_ = now;
   }
 
@@ -126,6 +144,46 @@ void NiceBidiWiFi::send_raw(const std::vector<uint8_t> &data) {
   this->tx_queue_.push(data);
 }
 
+void NiceBidiWiFi::send_raw_cmd(const std::string &hex_input) {
+  std::string hex;
+  hex.reserve(hex_input.size());
+  for (char c : hex_input) {
+    if (c == ' ' || c == '.' || c == ':' || c == '\t' || c == '\r' || c == '\n')
+      continue;
+    hex.push_back(c);
+  }
+  if (hex.empty()) {
+    ESP_LOGW(TAG, "send_raw_cmd: empty after stripping separators");
+    return;
+  }
+  if (hex.size() % 2 != 0) {
+    ESP_LOGW(TAG, "send_raw_cmd: odd number of hex digits (%u)", unsigned(hex.size()));
+    return;
+  }
+  auto nybble = [](char ch) -> int {
+    if (ch >= '0' && ch <= '9')
+      return ch - '0';
+    if (ch >= 'A' && ch <= 'F')
+      return ch - 'A' + 10;
+    if (ch >= 'a' && ch <= 'f')
+      return ch - 'a' + 10;
+    return -1;
+  };
+  std::vector<uint8_t> data;
+  data.reserve(hex.size() / 2);
+  for (size_t i = 0; i + 1 < hex.size(); i += 2) {
+    int hi = nybble(hex[i]);
+    int lo = nybble(hex[i + 1]);
+    if (hi < 0 || lo < 0) {
+      ESP_LOGW(TAG, "send_raw_cmd: non-hex character");
+      return;
+    }
+    data.push_back(static_cast<uint8_t>((hi << 4) | lo));
+  }
+  ESP_LOGD(TAG, "send_raw_cmd: queuing %u bytes", unsigned(data.size()));
+  this->send_raw(std::move(data));
+}
+
 // --- Discovery & Initialization ---
 
 void NiceBidiWiFi::discover_devices_() {
@@ -161,11 +219,18 @@ void NiceBidiWiFi::init_device_(uint8_t addr1, uint8_t addr2, uint8_t device_typ
     this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_AUTOCLS, RUN_GET));
     this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_PH_CLS_ON, RUN_GET));
     this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_ALW_CLS_ON, RUN_GET));
-    this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_TOTAL_COUNT, RUN_GET));
+    if (this->maneuver_count_sensor_ != nullptr) {
+      this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_TOTAL_COUNT, RUN_GET));
+      this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_NUM_MOVEMENTS, RUN_GET));
+    }
     this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_MAINT_COUNT, RUN_GET));
+    if (this->maintenance_threshold_sensor_ != nullptr)
+      this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_MAINT_THRESHOLD, RUN_GET));
     this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_DIAG_IO, RUN_GET));
+    if (this->diag_par_text_sensor_ != nullptr)
+      this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_DIAG_PAR, RUN_GET));
+    this->request_logical_inputs_();
     this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_STANDBY_ACT, RUN_GET));
-    this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_PEAK_ON, RUN_GET));
     this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_BLINK_ON, RUN_GET));
     this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_KEY_LOCK, RUN_GET));
     this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_DIAG_BB, RUN_GET));
@@ -191,11 +256,35 @@ void NiceBidiWiFi::request_position_() {
 void NiceBidiWiFi::request_status_refresh_() {
   this->tx_queue_.push(t4_build_inf(this->device_address_, this->hub_address_,
                                      DEV_CONTROLLER, REG_STATUS, RUN_GET));
+  if (this->maneuver_count_sensor_ != nullptr) {
+    uint8_t reg = this->maneuver_total_count_unsupported_ ? REG_NUM_MOVEMENTS : REG_TOTAL_COUNT;
+    this->tx_queue_.push(
+        t4_build_inf(this->device_address_, this->hub_address_, DEV_CONTROLLER, reg, RUN_GET));
+  }
 }
 
 void NiceBidiWiFi::request_io_state_() {
   this->tx_queue_.push(t4_build_inf(this->device_address_, this->hub_address_,
                                      DEV_CONTROLLER, REG_DIAG_IO, RUN_GET));
+}
+
+bool NiceBidiWiFi::any_logical_input_sensor_() const {
+  return this->input_1_sensor_ != nullptr || this->input_2_sensor_ != nullptr ||
+         this->input_3_sensor_ != nullptr || this->input_4_sensor_ != nullptr;
+}
+
+void NiceBidiWiFi::request_logical_inputs_() {
+  if (!this->any_logical_input_sensor_())
+    return;
+  T4Address addr = this->device_address_;
+  if (this->input_1_sensor_ != nullptr)
+    this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_IN1, RUN_GET));
+  if (this->input_2_sensor_ != nullptr)
+    this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_IN2, RUN_GET));
+  if (this->input_3_sensor_ != nullptr)
+    this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_IN3, RUN_GET));
+  if (this->input_4_sensor_ != nullptr)
+    this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_IN4, RUN_GET));
 }
 
 void NiceBidiWiFi::detect_device_type_() {
@@ -242,7 +331,8 @@ void NiceBidiWiFi::save_learned_timings_() {
 void NiceBidiWiFi::load_learned_timings_() {
   this->timing_pref_ = global_preferences->make_preference<LearnedTimings>(fnv1_hash("nice_bidiwifi_timing"));
   LearnedTimings data{};
-  if (this->timing_pref_.load(&data) && data.valid) {
+  const bool auto_learn = (this->cover_ == nullptr || this->cover_->get_auto_learn_timing());
+  if (auto_learn && this->timing_pref_.load(&data) && data.valid) {
     if (data.open_duration >= T4_MIN_LEARNED_DURATION && data.open_duration <= T4_MAX_LEARNED_DURATION) {
       this->last_open_duration_ms_ = data.open_duration;
     }
@@ -252,6 +342,36 @@ void NiceBidiWiFi::load_learned_timings_() {
     ESP_LOGI(TAG, "Loaded learned timings (open=%ums, close=%ums)",
              this->last_open_duration_ms_, this->last_close_duration_ms_);
   }
+  this->apply_cover_timing_fallbacks_();
+}
+
+void NiceBidiWiFi::apply_cover_timing_fallbacks_() {
+  if (this->cover_ == nullptr)
+    return;
+  uint32_t def_o = clamp_learned_duration_ms(this->cover_->get_default_open_duration_ms());
+  uint32_t def_c = clamp_learned_duration_ms(this->cover_->get_default_close_duration_ms());
+  if (!this->cover_->get_auto_learn_timing()) {
+    this->last_open_duration_ms_ = def_o;
+    this->last_close_duration_ms_ = def_c;
+    return;
+  }
+  if (this->last_open_duration_ms_ == 0 && def_o != 0)
+    this->last_open_duration_ms_ = def_o;
+  if (this->last_close_duration_ms_ == 0 && def_c != 0)
+    this->last_close_duration_ms_ = def_c;
+}
+
+uint32_t NiceBidiWiFi::effective_position_poll_ms_() const {
+  if (this->cover_ == nullptr)
+    return T4_POSITION_POLL_MS;
+  uint32_t ms = this->cover_->get_position_poll_interval_ms();
+  if (ms == 0)
+    return T4_POSITION_POLL_MS;
+  if (ms < 50)
+    ms = 50;
+  if (ms > 60000)
+    ms = 60000;
+  return ms;
 }
 
 void NiceBidiWiFi::confirm_position_from_io_(uint8_t io_byte) {
@@ -288,7 +408,8 @@ void NiceBidiWiFi::handle_movement_transition_(uint8_t old_state, uint8_t new_st
       this->movement_start_time_ > 0) {
     uint32_t duration = now_ms - this->movement_start_time_;
 
-    if (duration >= T4_MIN_LEARNED_DURATION && duration <= T4_MAX_LEARNED_DURATION) {
+    if ((this->cover_ == nullptr || this->cover_->get_auto_learn_timing()) &&
+        duration >= T4_MIN_LEARNED_DURATION && duration <= T4_MAX_LEARNED_DURATION) {
       if (old_state == STA_OPENING && new_state == STA_OPENED) {
         // Check deviation from existing value
         if (this->last_open_duration_ms_ == 0 ||
@@ -331,16 +452,20 @@ void NiceBidiWiFi::estimate_time_based_position_() {
     return;  // Encoder data is fresh, no estimation needed
   }
 
-  // Need learned durations to estimate
   uint32_t duration_ms = 0;
   if (this->operation_state_ == STA_OPENING && this->last_open_duration_ms_ > 0) {
     duration_ms = this->last_open_duration_ms_;
   } else if (this->operation_state_ == STA_CLOSING && this->last_close_duration_ms_ > 0) {
     duration_ms = this->last_close_duration_ms_;
+  } else if (this->cover_ != nullptr) {
+    if (this->operation_state_ == STA_OPENING)
+      duration_ms = clamp_learned_duration_ms(this->cover_->get_default_open_duration_ms());
+    else if (this->operation_state_ == STA_CLOSING)
+      duration_ms = clamp_learned_duration_ms(this->cover_->get_default_close_duration_ms());
   }
 
   if (duration_ms == 0 || this->movement_start_time_ == 0) {
-    return;  // No learned timing available
+    return;
   }
 
   float elapsed = static_cast<float>(now - this->movement_start_time_);
@@ -398,7 +523,15 @@ void NiceBidiWiFi::parse_packet_(const T4RxPacket &packet) {
   if (body_size == 0x0D && d.size() > 13 && d[13] == 0xFD) {
     uint8_t err_dev = (d.size() > 9) ? d[9] : 0;
     uint8_t err_reg = (d.size() > 10) ? d[10] : 0;
-    ESP_LOGW(TAG, "Error: device=0x%02X register=0x%02X (%s) not supported", err_dev, err_reg, t4_register_name(err_reg));
+    if (err_reg == REG_TOTAL_COUNT) {
+      this->maneuver_total_count_unsupported_ = true;
+      ESP_LOGI(TAG, "Register 0xB3 (total maneuvers) not supported — using 0xD4 reads for Total Maneuvers");
+    } else if (err_reg == REG_NUM_MOVEMENTS) {
+      ESP_LOGD(TAG, "Register 0xD4 (maneuver count) not supported on this controller");
+    } else {
+      ESP_LOGW(TAG, "Error: device=0x%02X register=0x%02X (%s) not supported", err_dev, err_reg,
+               t4_register_name(err_reg));
+    }
     return;
   }
 
@@ -511,13 +644,6 @@ void NiceBidiWiFi::parse_evt_packet_(const std::vector<uint8_t> &d) {
         }
         break;
 
-      case REG_PEAK_ON:
-        if (data_len >= 1 && d.size() > 14) {
-          this->peak_ = (d[14] != 0);
-          ESP_LOGI(TAG, "Peak mode: %s", this->peak_ ? "ON" : "OFF");
-        }
-        break;
-
       case REG_BLINK_ON:
         if (data_len >= 1 && d.size() > 14) {
           this->preflash_ = (d[14] != 0);
@@ -590,12 +716,8 @@ void NiceBidiWiFi::parse_evt_packet_(const std::vector<uint8_t> &d) {
         break;
 
       case REG_TOTAL_COUNT:
-        if (data_len >= 2 && d.size() > 15) {
-          this->maneuver_count_ = (d[14] << 8) | d[15];
-          ESP_LOGI(TAG, "Maneuver count: %u", this->maneuver_count_);
-          if (this->maneuver_count_sensor_ != nullptr)
-            this->maneuver_count_sensor_->publish_state(this->maneuver_count_);
-        }
+      case REG_NUM_MOVEMENTS:
+        this->update_maneuver_count_from_bytes_(data_len, 14, d);
         break;
 
       case REG_MAINT_COUNT:
@@ -605,6 +727,39 @@ void NiceBidiWiFi::parse_evt_packet_(const std::vector<uint8_t> &d) {
           if (this->maintenance_count_sensor_ != nullptr)
             this->maintenance_count_sensor_->publish_state(this->maintenance_count_);
         }
+        break;
+
+      case REG_MAINT_THRESHOLD:
+        if (this->maintenance_threshold_sensor_ != nullptr && data_len >= 1 && d.size() > 14) {
+          float thr = (data_len >= 2 && d.size() > 15) ? static_cast<float>((d[14] << 8) | d[15])
+                                                       : static_cast<float>(d[14]);
+          this->maintenance_threshold_sensor_->publish_state(thr);
+        }
+        break;
+
+      case REG_DIAG_PAR:
+        if (this->diag_par_text_sensor_ != nullptr && data_len >= 1 && d.size() > 14) {
+          size_t n = std::min(static_cast<size_t>(data_len), d.size() - 14);
+          std::vector<uint8_t> payload(d.begin() + 14, d.begin() + 14 + n);
+          this->diag_par_text_sensor_->publish_state(format_hex_pretty(payload));
+        }
+        break;
+
+      case REG_IN1:
+        if (this->input_1_sensor_ != nullptr && data_len >= 1 && d.size() > 14)
+          this->input_1_sensor_->publish_state(d[14] != 0);
+        break;
+      case REG_IN2:
+        if (this->input_2_sensor_ != nullptr && data_len >= 1 && d.size() > 14)
+          this->input_2_sensor_->publish_state(d[14] != 0);
+        break;
+      case REG_IN3:
+        if (this->input_3_sensor_ != nullptr && data_len >= 1 && d.size() > 14)
+          this->input_3_sensor_->publish_state(d[14] != 0);
+        break;
+      case REG_IN4:
+        if (this->input_4_sensor_ != nullptr && data_len >= 1 && d.size() > 14)
+          this->input_4_sensor_->publish_state(d[14] != 0);
         break;
 
       case REG_DIAG_IO:
@@ -936,6 +1091,29 @@ void NiceBidiWiFi::update_position_(uint16_t raw_pos) {
   this->last_encoder_update_time_ = millis();
   ESP_LOGV(TAG, "Position: %u (%.1f%%)", raw_pos, this->get_position_percent() * 100.0f);
   this->notify_state_change_();
+}
+
+void NiceBidiWiFi::update_maneuver_count_from_bytes_(uint8_t data_len, size_t offset,
+                                                     const std::vector<uint8_t> &d) {
+  if (this->maneuver_count_sensor_ == nullptr || data_len < 1 || d.size() < offset + 1) {
+    return;
+  }
+  uint32_t mc = 0;
+  if (data_len >= 4 && d.size() > offset + 3) {
+    mc = (uint32_t{d[offset]} << 24) | (uint32_t{d[offset + 1]} << 16) | (uint32_t{d[offset + 2]} << 8) |
+         d[offset + 3];
+  } else if (data_len >= 3 && d.size() > offset + 2) {
+    mc = (uint32_t{d[offset]} << 16) | (uint32_t{d[offset + 1]} << 8) | d[offset + 2];
+  } else if (data_len >= 2 && d.size() > offset + 1) {
+    mc = (uint32_t{d[offset]} << 8) | d[offset + 1];
+  } else {
+    mc = d[offset];
+  }
+  if (mc != this->maneuver_count_) {
+    ESP_LOGI(TAG, "Maneuver count: %u", mc);
+    this->maneuver_count_ = mc;
+  }
+  this->maneuver_count_sensor_->publish_state(static_cast<float>(mc));
 }
 
 float NiceBidiWiFi::get_position_percent() const {

@@ -8,6 +8,9 @@ DEPENDENCIES = ["nice_bidiwifi"]
 
 NiceNumber = nice_bidiwifi_ns.class_("NiceNumber", number.Number, cg.Component)
 
+# Min/max for force (0x4A/0x4B) and speed (0x42/0x43): typical Nice Bus-T4 / DMP usage is 1–100 (%).
+# Individual boards (e.g. CL201) may clamp internally or NACK SET outside their range — see the drive
+# programming manual; use send_raw_cmd from a template text entity to probe unsupported values.
 NUMBER_KEYS = {
     "pause_time": {
         "register": 0x81,
@@ -44,14 +47,42 @@ NUMBER_KEYS = {
         "step": 1,
         "unit": UNIT_PERCENT,
     },
+    "photo_close_time": {
+        "register": 0x85,
+        "min": 0,
+        "max": 250,
+        "step": 1,
+        "unit": UNIT_SECOND,
+    },
+    "photo_close_mode": {
+        "register": 0x86,
+        "min": 0,
+        "max": 15,
+        "step": 1,
+        "unit": None,
+    },
+    "always_close_time": {
+        "register": 0x89,
+        "min": 0,
+        "max": 250,
+        "step": 1,
+        "unit": UNIT_SECOND,
+    },
+    "always_close_mode": {
+        "register": 0x8A,
+        "min": 0,
+        "max": 15,
+        "step": 1,
+        "unit": None,
+    },
 }
 
 
 def _number_schema(key_info):
-    return number.number_schema(
-        NiceNumber,
-        unit_of_measurement=key_info["unit"],
-    )
+    kwargs = {}
+    if key_info["unit"] is not None:
+        kwargs["unit_of_measurement"] = key_info["unit"]
+    return number.number_schema(NiceNumber, **kwargs)
 
 
 CONFIG_SCHEMA = cv.Schema(

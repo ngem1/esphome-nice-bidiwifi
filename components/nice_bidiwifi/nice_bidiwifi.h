@@ -21,7 +21,6 @@ namespace nice_bidiwifi {
 // Forward declarations
 class NiceCover;
 class NiceNumber;
-class NiceSwitch;
 
 class NiceBidiWiFi : public Component {
  public:
@@ -47,13 +46,13 @@ class NiceBidiWiFi : public Component {
   // Entity registration
   void register_cover(NiceCover *cover) { this->cover_ = cover; }
   void register_number(NiceNumber *num) { this->numbers_.push_back(num); }
-  void register_switch(NiceSwitch *sw) { this->switches_.push_back(sw); }
 
   // Sensor setters
   void set_position_sensor(sensor::Sensor *s) { this->position_sensor_ = s; }
   void set_encoder_sensor(sensor::Sensor *s) { this->encoder_sensor_ = s; }
   void set_maneuver_count_sensor(sensor::Sensor *s) { this->maneuver_count_sensor_ = s; }
   void set_maintenance_count_sensor(sensor::Sensor *s) { this->maintenance_count_sensor_ = s; }
+  void set_maintenance_threshold_sensor(sensor::Sensor *s) { this->maintenance_threshold_sensor_ = s; }
 
   // Text sensor setters
   void set_product_text_sensor(text_sensor::TextSensor *s) { this->product_text_sensor_ = s; }
@@ -74,6 +73,8 @@ class NiceBidiWiFi : public Component {
   void send_set_register(uint8_t register_id, const std::vector<uint8_t> &data);
   void send_get_register(uint8_t register_id);
   void send_raw(const std::vector<uint8_t> &data);
+  /// Parse hex (ignore spaces/dots) and queue raw frame bytes, e.g. "55.0C..." or "550C00FF".
+  void send_raw_cmd(const std::string &hex_input);
 
   // State accessors
   bool is_device_found() const { return this->device_found_; }
@@ -97,17 +98,21 @@ class NiceBidiWiFi : public Component {
   bool is_photo_close() const { return this->photo_close_; }
   bool is_always_close() const { return this->always_close_; }
   bool is_standby() const { return this->standby_; }
-  bool is_peak() const { return this->peak_; }
   bool is_preflash() const { return this->preflash_; }
   bool is_locked() const { return this->lock_state_; }
 
   // Additional binary sensor setters
   void set_obstacle_sensor(binary_sensor::BinarySensor *s) { this->obstacle_sensor_ = s; }
   void set_locked_sensor(binary_sensor::BinarySensor *s) { this->locked_sensor_ = s; }
+  void set_input_1_sensor(binary_sensor::BinarySensor *s) { this->input_1_sensor_ = s; }
+  void set_input_2_sensor(binary_sensor::BinarySensor *s) { this->input_2_sensor_ = s; }
+  void set_input_3_sensor(binary_sensor::BinarySensor *s) { this->input_3_sensor_ = s; }
+  void set_input_4_sensor(binary_sensor::BinarySensor *s) { this->input_4_sensor_ = s; }
 
   // Additional text sensor setters
   void set_oxi_event_text_sensor(text_sensor::TextSensor *s) { this->oxi_event_text_sensor_ = s; }
   void set_last_stop_reason_text_sensor(text_sensor::TextSensor *s) { this->last_stop_reason_text_sensor_ = s; }
+  void set_diag_par_text_sensor(text_sensor::TextSensor *s) { this->diag_par_text_sensor_ = s; }
 
   // Callback
   void add_on_state_callback(std::function<void()> &&callback) {
@@ -160,7 +165,6 @@ class NiceBidiWiFi : public Component {
   bool photo_close_{false};
   bool always_close_{false};
   bool standby_{false};
-  bool peak_{false};
   bool preflash_{false};
 
   // Device type flags (auto-detected from product name)
@@ -185,7 +189,8 @@ class NiceBidiWiFi : public Component {
   // Counters
   uint32_t maneuver_count_{0};
   uint32_t maintenance_count_{0};
-
+  /// Set when REG_TOTAL_COUNT (0xB3) returns 0xFD — refresh uses REG_NUM_MOVEMENTS (0xD4) instead.
+  bool maneuver_total_count_unsupported_{false};
   // Timing
   uint32_t last_discovery_time_{0};
   uint32_t last_position_poll_time_{0};
@@ -205,13 +210,13 @@ class NiceBidiWiFi : public Component {
   // Entity pointers
   NiceCover *cover_{nullptr};
   std::vector<NiceNumber *> numbers_;
-  std::vector<NiceSwitch *> switches_;
 
   // Sensor pointers
   sensor::Sensor *position_sensor_{nullptr};
   sensor::Sensor *encoder_sensor_{nullptr};
   sensor::Sensor *maneuver_count_sensor_{nullptr};
   sensor::Sensor *maintenance_count_sensor_{nullptr};
+  sensor::Sensor *maintenance_threshold_sensor_{nullptr};
 
   // Text sensor pointers
   text_sensor::TextSensor *product_text_sensor_{nullptr};
@@ -227,9 +232,14 @@ class NiceBidiWiFi : public Component {
   binary_sensor::BinarySensor *limit_close_sensor_{nullptr};
   binary_sensor::BinarySensor *obstacle_sensor_{nullptr};
   binary_sensor::BinarySensor *locked_sensor_{nullptr};
+  binary_sensor::BinarySensor *input_1_sensor_{nullptr};
+  binary_sensor::BinarySensor *input_2_sensor_{nullptr};
+  binary_sensor::BinarySensor *input_3_sensor_{nullptr};
+  binary_sensor::BinarySensor *input_4_sensor_{nullptr};
 
   // Additional text sensor pointers
   text_sensor::TextSensor *last_stop_reason_text_sensor_{nullptr};
+  text_sensor::TextSensor *diag_par_text_sensor_{nullptr};
 
   // Callbacks
   std::vector<std::function<void()>> state_callbacks_;
@@ -248,11 +258,15 @@ class NiceBidiWiFi : public Component {
   void request_position_();
   void request_status_refresh_();
   void request_io_state_();
+  void request_logical_inputs_();
+  bool any_logical_input_sensor_() const;
   void request_status_confirmation_();
   void detect_device_type_();
   void estimate_time_based_position_();
   void save_learned_timings_();
   void load_learned_timings_();
+  void apply_cover_timing_fallbacks_();
+  uint32_t effective_position_poll_ms_() const;
   void handle_movement_transition_(uint8_t old_state, uint8_t new_state);
   void confirm_position_from_io_(uint8_t io_byte);
   void parse_packet_(const T4RxPacket &packet);
@@ -262,6 +276,7 @@ class NiceBidiWiFi : public Component {
   void parse_oxi_packet_(const std::vector<uint8_t> &data);
   void request_continuation_(uint8_t device_type, uint8_t register_id, uint8_t next_offset);
   void update_position_(uint16_t raw_pos);
+  void update_maneuver_count_from_bytes_(uint8_t data_len, size_t offset, const std::vector<uint8_t> &d);
   void notify_state_change_();
   void setup_leds_();
   void update_leds_();

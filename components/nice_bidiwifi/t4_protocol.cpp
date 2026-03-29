@@ -244,6 +244,7 @@ const char *t4_register_name(uint8_t reg) {
     case REG_MAINT_COUNT: return "Maintenance Count";
     case REG_TOTAL_COUNT: return "Total Count";
     case REG_MAINT_CANCEL: return "Maintenance Cancel";
+    case REG_NUM_MOVEMENTS: return "Number of Movements";
     case REG_DIAG_BB: return "Diagnostics Blackbox";
     case REG_DIAG_IO: return "Diagnostics I/O";
     case REG_DIAG_PAR: return "Diagnostics Parameters";

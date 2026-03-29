@@ -39,9 +39,6 @@ void NiceSwitch::on_state_change_() {
     case REG_STANDBY_ACT:
       current_state = this->hub_->is_standby();
       break;
-    case REG_PEAK_ON:
-      current_state = this->hub_->is_peak();
-      break;
     case REG_BLINK_ON:
       current_state = this->hub_->is_preflash();
       break;

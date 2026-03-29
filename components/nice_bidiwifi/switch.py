@@ -13,7 +13,6 @@ SWITCH_KEYS = {
     "photo_close": 0x84,
     "always_close": 0x88,
     "standby": 0x8C,
-    "peak_mode": 0x93,
     "pre_flash": 0x94,
     "key_lock": 0x9C,
 }
@@ -25,7 +24,6 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional("photo_close"): switch.switch_schema(NiceSwitch),
         cv.Optional("always_close"): switch.switch_schema(NiceSwitch),
         cv.Optional("standby"): switch.switch_schema(NiceSwitch),
-        cv.Optional("peak_mode"): switch.switch_schema(NiceSwitch),
         cv.Optional("pre_flash"): switch.switch_schema(NiceSwitch),
         cv.Optional("key_lock"): switch.switch_schema(NiceSwitch),
     }

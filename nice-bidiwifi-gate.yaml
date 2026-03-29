@@ -49,6 +49,11 @@ cover:
   - platform: nice_bidiwifi
     name: "Gate"
     device_class: gate
+    id: gate
+    auto_learn_timing: true
+    open_duration: 20s
+    close_duration: 20s
+    position_report_interval: 500ms
     # Set true if HA open/close matches the wrong physical direction (common on swing gates).
     # invert_open_close: true
     # If HA still greys out Open or Close, set false (no slider; buttons use state only).
@@ -85,6 +90,8 @@ switch:
       name: "Close After Photo"
     always_close:
       name: "Always Close"
+    standby:
+      name: "Standby"
     pre_flash:
       name: "Pre-Flash Warning"
     key_lock:
@@ -101,6 +108,8 @@ sensor:
       name: "Total Maneuvers"
     maintenance_count:
       name: "Maintenance Counter"
+    maintenance_threshold:
+      name: "Maintenance Threshold"
 
 # Info text sensors
 text_sensor:
@@ -117,6 +126,8 @@ text_sensor:
       name: "Manufacturer"
     last_stop_reason:
       name: "Last Stop Reason"
+    diagnostic_parameters:
+      name: "Diagnostic Parameters"
 
 # Diagnostics
 binary_sensor:
@@ -131,6 +142,14 @@ binary_sensor:
       name: "Obstacle Detected"
     locked:
       name: "Gate Locked"
+    input_1:
+      name: "Logic Input 1"
+    input_2:
+      name: "Logic Input 2"
+    input_3:
+      name: "Logic Input 3"
+    input_4:
+      name: "Logic Input 4"
 
 # Configuration numbers
 number:
@@ -141,3 +160,29 @@ number:
       name: "Opening Force"
     closing_force:
       name: "Closing Force"
+    opening_speed:
+      name: "Opening Speed"
+    closing_speed:
+      name: "Closing Speed"
+    photo_close_time:
+      name: "Photo Close Time"
+    photo_close_mode:
+      name: "Photo Close Mode"
+    always_close_time:
+      name: "Always Close Time"
+    always_close_mode:
+      name: "Always Close Mode"
+
+# Optional: paste a full T4 frame as hex (dots/spaces ignored). Calls id(my_gate).send_raw_cmd(...).
+# text:
+#   - platform: template
+#     name: "Raw T4 hex"
+#     id: raw_t4_hex
+#     optimistic: true
+#     mode: text
+#     on_value:
+#       then:
+#         - lambda: |-
+#             if (!x.empty()) {
+#               id(my_gate).send_raw_cmd(x);
+#             }

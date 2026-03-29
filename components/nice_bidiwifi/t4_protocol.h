@@ -199,6 +199,8 @@ enum T4Register : uint8_t {
   REG_MAINT_COUNT = 0xB2,
   REG_TOTAL_COUNT = 0xB3,
   REG_MAINT_CANCEL = 0xB4,
+  // Alternate maneuver counter on some boards (e.g. CL201): B3 returns unsupported; Nice HTTP uses FNC D4 for the same value.
+  REG_NUM_MOVEMENTS = 0xD4,
   REG_DIAG_BB = 0xD0,
   REG_DIAG_IO = 0xD1,
   REG_DIAG_PAR = 0xD2,
