@@ -172,5 +172,17 @@ number:
       name: "Always Close Time"
     always_close_mode:
       name: "Always Close Mode"
-# Raw T4 hex debugging: add a root-level template `text` entity (see README). If you uncomment an
-# example, keep `text:` at column 0 — not indented under `number:` — or YAML will fail to parse.
+
+# Bus debugging: paste hex (e.g. 55.0C... or 550C00FF); hub strips spaces/dots.
+text:
+  - platform: template
+    name: "Raw T4 hex"
+    id: raw_t4_hex
+    optimistic: true
+    mode: text
+    on_value:
+      then:
+        - lambda: |-
+            if (!x.empty()) {
+              id(my_gate).send_raw_cmd(x);
+            }
