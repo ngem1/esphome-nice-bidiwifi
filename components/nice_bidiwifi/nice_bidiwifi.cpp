@@ -449,12 +449,18 @@ void NiceBidiWiFi::handle_movement_transition_(uint8_t old_state, uint8_t new_st
   }
 }
 
-void NiceBidiWiFi::estimate_time_based_position_() {
-  // Only estimate if we haven't received fresh encoder data recently (>2s)
-  uint32_t now = millis();
-  if (now - this->last_encoder_update_time_ < 2000) {
-    return;  // Encoder data is fresh, no estimation needed
+void NiceBidiWiFi::get_effective_pos_limits_(uint16_t *out_open, uint16_t *out_close) const {
+  if (this->pos_open_ != this->pos_close_) {
+    *out_open = this->pos_open_;
+    *out_close = this->pos_close_;
+  } else {
+    *out_open = 2048;
+    *out_close = 0;
   }
+}
+
+void NiceBidiWiFi::estimate_time_based_position_() {
+  uint32_t now = millis();
 
   uint32_t duration_ms = 0;
   if (this->operation_state_ == STA_OPENING && this->last_open_duration_ms_ > 0) {
@@ -486,13 +492,18 @@ void NiceBidiWiFi::estimate_time_based_position_() {
   if (estimated_pos < 0.0f) estimated_pos = 0.0f;
   if (estimated_pos > 1.0f) estimated_pos = 1.0f;
 
-  // Publish estimated position to sensors
-  if (this->position_sensor_ != nullptr)
-    this->position_sensor_->publish_state(estimated_pos * 100.0f);
+  uint16_t eff_open, eff_close;
+  this->get_effective_pos_limits_(&eff_open, &eff_close);
+  uint32_t span = static_cast<uint32_t>(eff_open) - static_cast<uint32_t>(eff_close);
+  if (span == 0)
+    return;
+  uint32_t raw = static_cast<uint32_t>(eff_close) +
+                 static_cast<uint32_t>(estimated_pos * static_cast<float>(span) + 0.5f);
+  if (raw > 0xFFFF)
+    raw = 0xFFFF;
+  this->pos_current_ = static_cast<uint16_t>(raw);
 
-  for (auto &callback : this->state_callbacks_) {
-    callback();
-  }
+  this->notify_state_change_();
 }
 
 // --- Packet Parsing ---
@@ -1136,11 +1147,12 @@ void NiceBidiWiFi::update_maneuver_count_from_bytes_(uint8_t data_len, size_t of
 }
 
 float NiceBidiWiFi::get_position_percent() const {
-  if (this->pos_open_ == this->pos_close_) {
-    return 0.0f;  // Avoid division by zero
-  }
-  float percent = static_cast<float>(this->pos_current_ - this->pos_close_) /
-                  static_cast<float>(this->pos_open_ - this->pos_close_);
+  uint16_t eff_open, eff_close;
+  this->get_effective_pos_limits_(&eff_open, &eff_close);
+  float span = static_cast<float>(eff_open - eff_close);
+  if (span <= 0.0f)
+    return 0.0f;
+  float percent = static_cast<float>(this->pos_current_ - eff_close) / span;
   if (percent < 0.0f) percent = 0.0f;
   if (percent > 1.0f) percent = 1.0f;
   return percent;
