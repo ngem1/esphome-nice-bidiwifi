@@ -175,7 +175,9 @@ binary_sensor:
       name: "Logic Input 4"
 
 # Configuration numbers (raw register bytes on the bus).
-# Motor force/speed also have template selects below with manual L1–L8 / speed labels (karol27 / Nice manual style).
+# Force: template selects below (encoded bytes; not always 1–100 “%” on every Nice board).
+# Speed (0x42/0x43): this component uses 1–100 as Bus-T4 speed % (see README). CL201 logs showed e.g. 6 → 6%;
+# the old Robus/OView preset ladder (27,35,45,60,80,100) was wrong for this drive — use the number entities.
 number:
   - platform: nice_bidiwifi
     pause_time:
@@ -189,13 +191,11 @@ number:
       name: "Closing Force (raw)"
       internal: true
     opening_speed:
-      id: nf_opening_speed
-      name: "Opening Speed (raw)"
-      internal: true
+      name: "Opening speed"
+      mode: SLIDER
     closing_speed:
-      id: nf_closing_speed
-      name: "Closing Speed (raw)"
-      internal: true
+      name: "Closing speed"
+      mode: SLIDER
     photo_close_time:
       name: "Photo Close Time"
     photo_close_mode:
@@ -209,7 +209,6 @@ number:
 # - Aria (EN) Nice Home Aria PDF, §8.1.1.1 Table 4 — Motor force "Value" column lists exactly: Low | Medium-low *
 #   (see extracted text; additional Bus-T4 encodings are not named there).
 # - nice_dmbm_integration_protocol.pdf: no per-tier force/speed names; position uses "A value between 0 and 100" (different function).
-# Speed: Aria uses "slow" / "fast" (e.g. §4 programming); intermediate tiers are Bus-T4 payload only — labelled with the numeric byte.
 select:
   - platform: template
     name: "L2 L5 — Force open"
@@ -296,80 +295,6 @@ select:
             else if (x == "Motor force — raw 16") v = 16;
             else if (x == "Motor force — raw 18") v = 18;
             id(nf_closing_force).make_call().set_value((float) v).perform();
-
-  - platform: template
-    name: "L2 L3 — Open speed"
-    id: motor_speed_open_select
-    update_interval: 2s
-    options:
-      - "slow"
-      - "Movement speed — 35"
-      - "Movement speed — 45"
-      - "Movement speed — 60"
-      - "Movement speed — 80"
-      - "fast"
-      - "other"
-    lambda: |-
-      if (!id(nf_opening_speed).has_state())
-        return std::string("other");
-      switch ((int) id(nf_opening_speed).state) {
-        case 27: return std::string("slow");
-        case 35: return std::string("Movement speed — 35");
-        case 45: return std::string("Movement speed — 45");
-        case 60: return std::string("Movement speed — 60");
-        case 80: return std::string("Movement speed — 80");
-        case 100: return std::string("fast");
-        default: return std::string("other");
-      }
-    set_action:
-      then:
-        - lambda: |-
-            if (x == "other") return;
-            int v = 27;
-            if (x == "slow") v = 27;
-            else if (x == "Movement speed — 35") v = 35;
-            else if (x == "Movement speed — 45") v = 45;
-            else if (x == "Movement speed — 60") v = 60;
-            else if (x == "Movement speed — 80") v = 80;
-            else if (x == "fast") v = 100;
-            id(nf_opening_speed).make_call().set_value((float) v).perform();
-
-  - platform: template
-    name: "L2 L3 — Close speed"
-    id: motor_speed_close_select
-    update_interval: 2s
-    options:
-      - "slow"
-      - "Movement speed — 35"
-      - "Movement speed — 45"
-      - "Movement speed — 60"
-      - "Movement speed — 80"
-      - "fast"
-      - "other"
-    lambda: |-
-      if (!id(nf_closing_speed).has_state())
-        return std::string("other");
-      switch ((int) id(nf_closing_speed).state) {
-        case 27: return std::string("slow");
-        case 35: return std::string("Movement speed — 35");
-        case 45: return std::string("Movement speed — 45");
-        case 60: return std::string("Movement speed — 60");
-        case 80: return std::string("Movement speed — 80");
-        case 100: return std::string("fast");
-        default: return std::string("other");
-      }
-    set_action:
-      then:
-        - lambda: |-
-            if (x == "other") return;
-            int v = 27;
-            if (x == "slow") v = 27;
-            else if (x == "Movement speed — 35") v = 35;
-            else if (x == "Movement speed — 45") v = 45;
-            else if (x == "Movement speed — 60") v = 60;
-            else if (x == "Movement speed — 80") v = 80;
-            else if (x == "fast") v = 100;
-            id(nf_closing_speed).make_call().set_value((float) v).perform();
 
 # Bus debugging: paste hex (e.g. 55.0C... or 550C00FF); hub strips spaces/dots.
 text:
