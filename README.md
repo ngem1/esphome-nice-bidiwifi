@@ -361,7 +361,9 @@ If you need to try values outside the number entities, or to replay a capture fr
 
 The hub exposes **`send_raw_cmd(std::string)`**, same idea as [makstech/esphome-BusT4](https://github.com/makstech/esphome-BusT4): pass a hex string (`"55.0C.00.FF..."` or `"550C00FF..."`; spaces, dots, colons, and newlines are ignored). An **odd** digit count or invalid characters are rejected (nothing is sent).
 
-Use a **template `text`** entity in Home Assistant and call **`id(<your_hub_id>).send_raw_cmd(x)`** (the hub id from `nice_bidiwifi:`, not the cover id). Example:
+Use a **template `text`** entity in Home Assistant and call **`id(<your_hub_id>).send_raw_cmd(x)`** (the hub id from `nice_bidiwifi:`, not the cover id). Put **`text:` at the root of the YAML** (same indentation as `esphome:`, `number:`, `wifi:`). If `text:` is indented under the `number:` block, the file will fail to parse with an error near that line.
+
+Example:
 
 ```yaml
 text:
