@@ -174,19 +174,28 @@ binary_sensor:
     input_4:
       name: "Logic Input 4"
 
-# Configuration numbers
+# Configuration numbers (raw register bytes on the bus).
+# Motor force/speed also have template selects below with manual L1–L8 / speed labels (karol27 / Nice manual style).
 number:
   - platform: nice_bidiwifi
     pause_time:
       name: "Pause Time"
     opening_force:
-      name: "Opening Force"
+      id: nf_opening_force
+      name: "Opening Force (raw)"
+      internal: true
     closing_force:
-      name: "Closing Force"
+      id: nf_closing_force
+      name: "Closing Force (raw)"
+      internal: true
     opening_speed:
-      name: "Opening Speed"
+      id: nf_opening_speed
+      name: "Opening Speed (raw)"
+      internal: true
     closing_speed:
-      name: "Closing Speed"
+      id: nf_closing_speed
+      name: "Closing Speed (raw)"
+      internal: true
     photo_close_time:
       name: "Photo Close Time"
     photo_close_mode:
@@ -195,6 +204,172 @@ number:
       name: "Always Close Time"
     always_close_mode:
       name: "Always Close Mode"
+
+# Manual-aligned labels:
+# - Aria (EN) Nice Home Aria PDF, §8.1.1.1 Table 4 — Motor force "Value" column lists exactly: Low | Medium-low *
+#   (see extracted text; additional Bus-T4 encodings are not named there).
+# - nice_dmbm_integration_protocol.pdf: no per-tier force/speed names; position uses "A value between 0 and 100" (different function).
+# Speed: Aria uses "slow" / "fast" (e.g. §4 programming); intermediate tiers are Bus-T4 payload only — labelled with the numeric byte.
+select:
+  - platform: template
+    name: "L2 L5 — Force open"
+    id: motor_force_open_select
+    update_interval: 2s
+    options:
+      - "Low"
+      - "Medium-low *"
+      - "Motor force — raw 2"
+      - "Motor force — raw 3"
+      - "Motor force — raw 4"
+      - "Motor force — raw 7"
+      - "Motor force — raw 16"
+      - "Motor force — raw 18"
+      - "other"
+    lambda: |-
+      if (!id(nf_opening_force).has_state())
+        return std::string("other");
+      switch ((int) id(nf_opening_force).state) {
+        case 1: return std::string("Low");
+        case 17: return std::string("Medium-low *");
+        case 2: return std::string("Motor force — raw 2");
+        case 3: return std::string("Motor force — raw 3");
+        case 4: return std::string("Motor force — raw 4");
+        case 7: return std::string("Motor force — raw 7");
+        case 16: return std::string("Motor force — raw 16");
+        case 18: return std::string("Motor force — raw 18");
+        default: return std::string("other");
+      }
+    set_action:
+      then:
+        - lambda: |-
+            if (x == "other") return;
+            int v = 1;
+            if (x == "Low") v = 1;
+            else if (x == "Medium-low *") v = 17;
+            else if (x == "Motor force — raw 2") v = 2;
+            else if (x == "Motor force — raw 3") v = 3;
+            else if (x == "Motor force — raw 4") v = 4;
+            else if (x == "Motor force — raw 7") v = 7;
+            else if (x == "Motor force — raw 16") v = 16;
+            else if (x == "Motor force — raw 18") v = 18;
+            id(nf_opening_force).make_call().set_value((float) v).perform();
+
+  - platform: template
+    name: "L2 L5 — Force close"
+    id: motor_force_close_select
+    update_interval: 2s
+    options:
+      - "Low"
+      - "Medium-low *"
+      - "Motor force — raw 2"
+      - "Motor force — raw 3"
+      - "Motor force — raw 4"
+      - "Motor force — raw 7"
+      - "Motor force — raw 16"
+      - "Motor force — raw 18"
+      - "other"
+    lambda: |-
+      if (!id(nf_closing_force).has_state())
+        return std::string("other");
+      switch ((int) id(nf_closing_force).state) {
+        case 1: return std::string("Low");
+        case 17: return std::string("Medium-low *");
+        case 2: return std::string("Motor force — raw 2");
+        case 3: return std::string("Motor force — raw 3");
+        case 4: return std::string("Motor force — raw 4");
+        case 7: return std::string("Motor force — raw 7");
+        case 16: return std::string("Motor force — raw 16");
+        case 18: return std::string("Motor force — raw 18");
+        default: return std::string("other");
+      }
+    set_action:
+      then:
+        - lambda: |-
+            if (x == "other") return;
+            int v = 1;
+            if (x == "Low") v = 1;
+            else if (x == "Medium-low *") v = 17;
+            else if (x == "Motor force — raw 2") v = 2;
+            else if (x == "Motor force — raw 3") v = 3;
+            else if (x == "Motor force — raw 4") v = 4;
+            else if (x == "Motor force — raw 7") v = 7;
+            else if (x == "Motor force — raw 16") v = 16;
+            else if (x == "Motor force — raw 18") v = 18;
+            id(nf_closing_force).make_call().set_value((float) v).perform();
+
+  - platform: template
+    name: "L2 L3 — Open speed"
+    id: motor_speed_open_select
+    update_interval: 2s
+    options:
+      - "slow"
+      - "Movement speed — 35"
+      - "Movement speed — 45"
+      - "Movement speed — 60"
+      - "Movement speed — 80"
+      - "fast"
+      - "other"
+    lambda: |-
+      if (!id(nf_opening_speed).has_state())
+        return std::string("other");
+      switch ((int) id(nf_opening_speed).state) {
+        case 27: return std::string("slow");
+        case 35: return std::string("Movement speed — 35");
+        case 45: return std::string("Movement speed — 45");
+        case 60: return std::string("Movement speed — 60");
+        case 80: return std::string("Movement speed — 80");
+        case 100: return std::string("fast");
+        default: return std::string("other");
+      }
+    set_action:
+      then:
+        - lambda: |-
+            if (x == "other") return;
+            int v = 27;
+            if (x == "slow") v = 27;
+            else if (x == "Movement speed — 35") v = 35;
+            else if (x == "Movement speed — 45") v = 45;
+            else if (x == "Movement speed — 60") v = 60;
+            else if (x == "Movement speed — 80") v = 80;
+            else if (x == "fast") v = 100;
+            id(nf_opening_speed).make_call().set_value((float) v).perform();
+
+  - platform: template
+    name: "L2 L3 — Close speed"
+    id: motor_speed_close_select
+    update_interval: 2s
+    options:
+      - "slow"
+      - "Movement speed — 35"
+      - "Movement speed — 45"
+      - "Movement speed — 60"
+      - "Movement speed — 80"
+      - "fast"
+      - "other"
+    lambda: |-
+      if (!id(nf_closing_speed).has_state())
+        return std::string("other");
+      switch ((int) id(nf_closing_speed).state) {
+        case 27: return std::string("slow");
+        case 35: return std::string("Movement speed — 35");
+        case 45: return std::string("Movement speed — 45");
+        case 60: return std::string("Movement speed — 60");
+        case 80: return std::string("Movement speed — 80");
+        case 100: return std::string("fast");
+        default: return std::string("other");
+      }
+    set_action:
+      then:
+        - lambda: |-
+            if (x == "other") return;
+            int v = 27;
+            if (x == "slow") v = 27;
+            else if (x == "Movement speed — 35") v = 35;
+            else if (x == "Movement speed — 45") v = 45;
+            else if (x == "Movement speed — 60") v = 60;
+            else if (x == "Movement speed — 80") v = 80;
+            else if (x == "fast") v = 100;
+            id(nf_closing_speed).make_call().set_value((float) v).perform();
 
 # Bus debugging: paste hex (e.g. 55.0C... or 550C00FF); hub strips spaces/dots.
 text:
