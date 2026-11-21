@@ -40,6 +40,16 @@ When the controller returns current/encoder position, it updates the cover and o
 
 Encoder-derived position is preferred only when a reading arrived within the last **2 seconds**; if it is older, time-based estimation may be used instead.
 
+Position percentage is calculated from DMP registers (matching the [homeassistant_nice](https://github.com/Jordi-14/homeassistant_nice) integration):
+
+```text
+position% = (0x11 current − 0x19 closed) / (0x18 open − 0x19 closed) × 100
+```
+
+- `0x11` = current encoder position (`REG_CUR_POS`)
+- `0x18` = full-open encoder value (`REG_POS_MAX`) — **not** `0x12` (`REG_MAX_OPN`, partial-open reference)
+- `0x19` = closed encoder value (`REG_POS_MIN`)
+
 **Robus** units are detected from the product name; for those, position is **not** polled during movement because the drive does not handle it reliably.
 
 **Walky** controllers use **1-byte** position values; most others use two-byte values (and some use a three-byte layout).

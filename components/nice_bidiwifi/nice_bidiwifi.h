@@ -272,7 +272,8 @@ class NiceBidiWiFi : public Component {
   void load_learned_timings_();
   void apply_cover_timing_fallbacks_();
   uint32_t effective_position_poll_ms_() const;
-  /// When pos_open_ == pos_close_ (NACK / unsupported limits), use 2048/0 so % and time-estimate still work.
+  /// When limits are unknown (NACK), use 2048/0 so % and time-estimate still work.
+  /// Open endpoint uses REG_POS_MAX (0x18); REG_MAX_OPN (0x12) is partial-open reference only.
   void get_effective_pos_limits_(uint16_t *out_open, uint16_t *out_close) const;
   void handle_movement_transition_(uint8_t old_state, uint8_t new_state);
   void confirm_position_from_io_(uint8_t io_byte);

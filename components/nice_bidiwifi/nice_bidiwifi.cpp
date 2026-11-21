@@ -2,7 +2,9 @@
 #include "nice_cover.h"
 #include "nice_number.h"
 #include "esphome/core/helpers.h"
+#include "esphome/core/version.h"
 #include <algorithm>
+#include <cinttypes>
 #include "driver/gpio.h"
 
 namespace esphome {
@@ -107,7 +109,11 @@ void NiceBidiWiFi::loop() {
   // 8. Time-based position estimation during movement (fallback when encoder unavailable)
   if (this->device_found_ && this->init_complete_ &&
       (this->operation_state_ == STA_OPENING || this->operation_state_ == STA_CLOSING)) {
-    this->estimate_time_based_position_();
+    bool encoder_stale = this->last_encoder_update_time_ == 0 ||
+                         (now - this->last_encoder_update_time_ > T4_ENCODER_FRESH_MS);
+    if (encoder_stale) {
+      this->estimate_time_based_position_();
+    }
   }
 
   // 9. Update status LEDs (~20Hz for smooth blink patterns)
@@ -328,7 +334,7 @@ void NiceBidiWiFi::save_learned_timings_() {
   data.close_duration = this->last_close_duration_ms_;
   data.valid = (data.open_duration > 0 || data.close_duration > 0);
   if (this->timing_pref_.save(&data)) {
-    ESP_LOGI(TAG, "Saved learned timings (open=%ums, close=%ums)", data.open_duration, data.close_duration);
+    ESP_LOGI(TAG, "Saved learned timings (open=%" PRIu32 "ms, close=%" PRIu32 "ms)", data.open_duration, data.close_duration);
   }
 }
 
@@ -343,7 +349,7 @@ void NiceBidiWiFi::load_learned_timings_() {
     if (data.close_duration >= T4_MIN_LEARNED_DURATION && data.close_duration <= T4_MAX_LEARNED_DURATION) {
       this->last_close_duration_ms_ = data.close_duration;
     }
-    ESP_LOGI(TAG, "Loaded learned timings (open=%ums, close=%ums)",
+    ESP_LOGI(TAG, "Loaded learned timings (open=%" PRIu32 "ms, close=%" PRIu32 "ms)",
              this->last_open_duration_ms_, this->last_close_duration_ms_);
   }
   this->apply_cover_timing_fallbacks_();
@@ -388,8 +394,9 @@ void NiceBidiWiFi::confirm_position_from_io_(uint8_t io_byte) {
     ESP_LOGD(TAG, "Position confirmed: CLOSED via limit switch");
     this->notify_state_change_();
   } else if (limit_open && this->operation_state_ == STA_OPENED) {
-    // Confirmed fully open
-    this->pos_current_ = this->pos_open_;
+    // Confirmed fully open — use REG_POS_MAX (0x18), not REG_MAX_OPN (0x12)
+    uint16_t open_limit = this->pos_max_ != 0 ? this->pos_max_ : this->pos_open_;
+    this->pos_current_ = open_limit;
     ESP_LOGD(TAG, "Position confirmed: OPEN via limit switch");
     this->notify_state_change_();
   }
@@ -418,17 +425,17 @@ void NiceBidiWiFi::handle_movement_transition_(uint8_t old_state, uint8_t new_st
         // Check deviation from existing value
         if (this->last_open_duration_ms_ == 0 ||
             std::abs(static_cast<float>(duration) - static_cast<float>(this->last_open_duration_ms_)) /
-            static_cast<float>(this->last_open_duration_ms_) <= T4_LEARNING_DEVIATION + 0.5f) {
+            static_cast<float>(this->last_open_duration_ms_) <= T4_LEARNING_DEVIATION) {
           this->last_open_duration_ms_ = duration;
-          ESP_LOGI(TAG, "Learned open duration: %u ms", duration);
+          ESP_LOGI(TAG, "Learned open duration: %" PRIu32 " ms", duration);
           this->save_learned_timings_();
         }
       } else if (old_state == STA_CLOSING && new_state == STA_CLOSED) {
         if (this->last_close_duration_ms_ == 0 ||
             std::abs(static_cast<float>(duration) - static_cast<float>(this->last_close_duration_ms_)) /
-            static_cast<float>(this->last_close_duration_ms_) <= T4_LEARNING_DEVIATION + 0.5f) {
+            static_cast<float>(this->last_close_duration_ms_) <= T4_LEARNING_DEVIATION) {
           this->last_close_duration_ms_ = duration;
-          ESP_LOGI(TAG, "Learned close duration: %u ms", duration);
+          ESP_LOGI(TAG, "Learned close duration: %" PRIu32 " ms", duration);
           this->save_learned_timings_();
         }
       }
@@ -450,8 +457,10 @@ void NiceBidiWiFi::handle_movement_transition_(uint8_t old_state, uint8_t new_st
 }
 
 void NiceBidiWiFi::get_effective_pos_limits_(uint16_t *out_open, uint16_t *out_close) const {
-  if (this->pos_open_ != this->pos_close_) {
-    *out_open = this->pos_open_;
+  // Position % uses REG_POS_MAX (0x18) for the open endpoint; REG_MAX_OPN (0x12) is partial-open reference.
+  uint16_t open_limit = this->pos_max_ != 0 ? this->pos_max_ : this->pos_open_;
+  if (open_limit != this->pos_close_) {
+    *out_open = open_limit;
     *out_close = this->pos_close_;
   } else {
     *out_open = 2048;
@@ -566,7 +575,7 @@ void NiceBidiWiFi::parse_packet_(const T4RxPacket &packet) {
     }
 
     uint8_t response_type = d[11];  // run_cmd echo
-    uint8_t next_data = d[12];
+    uint8_t next_data = d[13];    // continuation offset (d[12] is value length)
 
     // Check response type
     // GET response: run_cmd was 0x99, response is 0x99-0x80=0x19 or 0x99-0x81=0x18
@@ -752,7 +761,7 @@ void NiceBidiWiFi::parse_evt_packet_(const std::vector<uint8_t> &d) {
       case REG_MAINT_COUNT:
         if (data_len >= 2 && d.size() > 15) {
           this->maintenance_count_ = (d[14] << 8) | d[15];
-          ESP_LOGI(TAG, "Maintenance count: %u", this->maintenance_count_);
+          ESP_LOGI(TAG, "Maintenance count: %" PRIu32, this->maintenance_count_);
           if (this->maintenance_count_sensor_ != nullptr)
             this->maintenance_count_sensor_->publish_state(this->maintenance_count_);
         }
@@ -769,8 +778,14 @@ void NiceBidiWiFi::parse_evt_packet_(const std::vector<uint8_t> &d) {
       case REG_DIAG_PAR:
         if (this->diag_par_text_sensor_ != nullptr && data_len >= 1 && d.size() > 14) {
           size_t n = std::min(static_cast<size_t>(data_len), d.size() - 14);
+#if ESPHOME_VERSION_CODE >= VERSION_CODE(2026, 1, 0)
+          char hex_buf[3 * 128];
+          this->diag_par_text_sensor_->publish_state(
+              format_hex_pretty_to(hex_buf, sizeof(hex_buf), d.data() + 14, n));
+#else
           std::vector<uint8_t> payload(d.begin() + 14, d.begin() + 14 + n);
           this->diag_par_text_sensor_->publish_state(format_hex_pretty(payload));
+#endif
         }
         break;
 
@@ -793,16 +808,15 @@ void NiceBidiWiFi::parse_evt_packet_(const std::vector<uint8_t> &d) {
 
       case REG_DIAG_IO:
         ESP_LOGV(TAG, "Diagnostic I/O data received (%d bytes)", data_len);
-        // Parse limit switch states from data byte at offset 16 (d[14+2] = d[16])
-        if (d.size() > 16) {
-          uint8_t io_byte = d[16];
+        // I/O byte: payload[2] when len>=3, else payload[0] (matches homeassistant_nice)
+        if (data_len >= 1 && d.size() > 14) {
+          uint8_t io_byte = (data_len >= 3 && d.size() > 16) ? d[16] : d[14];
           if (this->limit_close_sensor_ != nullptr)
             this->limit_close_sensor_->publish_state((io_byte & 0x01) != 0);
           if (this->limit_open_sensor_ != nullptr)
             this->limit_open_sensor_->publish_state((io_byte & 0x02) != 0);
           if (this->photocell_sensor_ != nullptr)
             this->photocell_sensor_->publish_state((io_byte & 0x04) != 0);
-          // Use limit switches to confirm position
           this->confirm_position_from_io_(io_byte);
         }
         break;
@@ -1089,12 +1103,12 @@ void NiceBidiWiFi::parse_oxi_packet_(const std::vector<uint8_t> &d) {
     uint8_t remote_mode = d[21] + 1;
     uint8_t press_count = d[20];
 
-    ESP_LOGI(TAG, "OXI remote: serial=%08X button=%u cmd=%u mode=%u presses=%u",
+    ESP_LOGI(TAG, "OXI remote: serial=%08" PRIX32 " button=%u cmd=%u mode=%u presses=%u",
              remote_serial, remote_button, remote_command, remote_mode, press_count);
 
     if (this->oxi_event_text_sensor_ != nullptr) {
       char buf[64];
-      snprintf(buf, sizeof(buf), "remote:%08X btn:%u cmd:%u", remote_serial, remote_button, remote_command);
+      snprintf(buf, sizeof(buf), "remote:%08" PRIX32 " btn:%u cmd:%u", remote_serial, remote_button, remote_command);
       this->oxi_event_text_sensor_->publish_state(buf);
     }
   } else if (command == OXI_BUTTON_READ && subcommand == 0x41 && sequence == 0x08 && d.size() >= 18) {
@@ -1102,11 +1116,11 @@ void NiceBidiWiFi::parse_oxi_packet_(const std::vector<uint8_t> &d) {
     uint8_t button = d[14] >> 4;
     uint32_t remote_serial = (d[14] & 0x0F) | (d[15] << 4) | (d[16] << 12) | (d[17] << 20);
 
-    ESP_LOGI(TAG, "OXI button press: serial=%08X button=%u", remote_serial, button);
+    ESP_LOGI(TAG, "OXI button press: serial=%08" PRIX32 " button=%u", remote_serial, button);
 
     if (this->oxi_event_text_sensor_ != nullptr) {
       char buf[48];
-      snprintf(buf, sizeof(buf), "button:%08X btn:%u", remote_serial, button);
+      snprintf(buf, sizeof(buf), "button:%08" PRIX32 " btn:%u", remote_serial, button);
       this->oxi_event_text_sensor_->publish_state(buf);
     }
   } else {
@@ -1140,7 +1154,7 @@ void NiceBidiWiFi::update_maneuver_count_from_bytes_(uint8_t data_len, size_t of
     mc = d[offset];
   }
   if (mc != this->maneuver_count_) {
-    ESP_LOGI(TAG, "Maneuver count: %u", mc);
+    ESP_LOGI(TAG, "Maneuver count: %" PRIu32, mc);
     this->maneuver_count_ = mc;
   }
   this->maneuver_count_sensor_->publish_state(static_cast<float>(mc));

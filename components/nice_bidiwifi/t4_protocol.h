@@ -26,6 +26,7 @@ static const uint8_t T4_DISCOVERY_BACKOFF_COUNT = 5;
 static const uint32_t T4_MIN_LEARNED_DURATION = 3000;    // 3 seconds
 static const uint32_t T4_MAX_LEARNED_DURATION = 300000;  // 5 minutes
 static const float T4_LEARNING_DEVIATION = 0.10f;        // 10% threshold
+static const uint32_t T4_ENCODER_FRESH_MS = 2000;      // prefer encoder over time estimate
 
 // Protocol types
 enum T4Protocol : uint8_t {
