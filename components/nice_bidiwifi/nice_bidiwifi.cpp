@@ -66,7 +66,7 @@ void NiceBidiWiFi::loop() {
   // 2. Process TX queue
   if (this->bus_.ready_to_send() && !this->tx_queue_.empty()) {
     this->bus_.send(this->tx_queue_.front());
-    this->tx_queue_.pop();
+    this->tx_queue_.pop_front();
     this->last_bus_activity_time_ = now;
   }
 
@@ -87,22 +87,28 @@ void NiceBidiWiFi::loop() {
   if (this->device_found_ && this->init_complete_ && !this->is_robus_ &&
       (this->operation_state_ == STA_OPENING || this->operation_state_ == STA_CLOSING) &&
       (now - this->last_position_poll_time_ >= this->effective_position_poll_ms_())) {
-    this->request_position_();
+    if (this->tx_queue_.size() < T4_TX_POLL_QUEUE_LIMIT) {
+      this->request_position_();
+    }
     this->last_position_poll_time_ = now;
   }
 
   // 6. Periodic status refresh (recovers from missed packets)
   if (this->device_found_ && this->init_complete_ &&
       (now - this->last_status_refresh_time_ >= T4_STATUS_REFRESH_MS)) {
-    this->request_status_refresh_();
+    if (this->tx_queue_.size() < T4_TX_POLL_QUEUE_LIMIT) {
+      this->request_status_refresh_();
+    }
     this->last_status_refresh_time_ = now;
   }
 
   // 7. Periodic I/O state polling (limit switches, photocell, logical inputs)
   if (this->device_found_ && this->init_complete_ &&
       (now - this->last_io_poll_time_ >= T4_IO_POLL_MS)) {
-    this->request_io_state_();
-    this->request_logical_inputs_();
+    if (this->tx_queue_.size() < T4_TX_POLL_QUEUE_LIMIT) {
+      this->request_io_state_();
+      this->request_logical_inputs_();
+    }
     this->last_io_poll_time_ = now;
   }
 
@@ -125,17 +131,32 @@ void NiceBidiWiFi::loop() {
 
 // --- Command API ---
 
+void NiceBidiWiFi::enqueue_tx_(std::vector<uint8_t> pkt, bool priority) {
+  if (priority) {
+    if (this->tx_queue_.size() >= T4_TX_QUEUE_MAX) {
+      this->tx_queue_.pop_back();
+    }
+    this->tx_queue_.push_front(std::move(pkt));
+    return;
+  }
+  if (this->tx_queue_.size() >= T4_TX_QUEUE_MAX) {
+    ESP_LOGW(TAG, "TX queue full (%u), dropping packet", unsigned(this->tx_queue_.size()));
+    return;
+  }
+  this->tx_queue_.push_back(std::move(pkt));
+}
+
 void NiceBidiWiFi::send_control_cmd(uint8_t cmd) {
   ESP_LOGI(TAG, "Sending control command: %s (0x%02X)", t4_control_cmd_name(cmd), cmd);
   auto pkt = t4_build_cmd(this->device_address_, this->hub_address_, cmd);
-  this->tx_queue_.push(std::move(pkt));
+  this->enqueue_tx_(std::move(pkt), /*priority=*/true);
 }
 
 void NiceBidiWiFi::send_inf_cmd(uint8_t device_type, uint8_t register_id, uint8_t run_cmd,
                                  uint8_t next_data, const std::vector<uint8_t> &data) {
   auto pkt = t4_build_inf(this->device_address_, this->hub_address_,
                            device_type, register_id, run_cmd, next_data, data);
-  this->tx_queue_.push(std::move(pkt));
+  this->enqueue_tx_(std::move(pkt));
 }
 
 void NiceBidiWiFi::send_set_register(uint8_t register_id, const std::vector<uint8_t> &data) {
@@ -147,7 +168,7 @@ void NiceBidiWiFi::send_get_register(uint8_t register_id) {
 }
 
 void NiceBidiWiFi::send_raw(const std::vector<uint8_t> &data) {
-  this->tx_queue_.push(data);
+  this->enqueue_tx_(data);
 }
 
 void NiceBidiWiFi::send_raw_cmd(const std::string &hex_input) {
@@ -196,13 +217,13 @@ void NiceBidiWiFi::discover_devices_() {
   ESP_LOGI(TAG, "Discovering devices on bus...");
   // Query WHO on broadcast (all device types)
   auto who = t4_build_inf(T4_BROADCAST, this->hub_address_, DEV_ALL, REG_WHO, RUN_GET);
-  this->tx_queue_.push(std::move(who));
+  this->enqueue_tx_(std::move(who));
   // Query WHO specifically for OXI/radio devices (profile 0x0A)
   auto who_radio = t4_build_inf(T4_BROADCAST, this->hub_address_, DEV_RADIO, REG_WHO, RUN_GET);
-  this->tx_queue_.push(std::move(who_radio));
+  this->enqueue_tx_(std::move(who_radio));
   // Query PRODUCT on broadcast
   auto prod = t4_build_inf(T4_BROADCAST, this->hub_address_, DEV_ALL, REG_PRODUCT, RUN_GET);
-  this->tx_queue_.push(std::move(prod));
+  this->enqueue_tx_(std::move(prod));
 }
 
 void NiceBidiWiFi::init_device_(uint8_t addr1, uint8_t addr2, uint8_t device_type) {
@@ -211,71 +232,71 @@ void NiceBidiWiFi::init_device_(uint8_t addr1, uint8_t addr2, uint8_t device_typ
 
   if (device_type == DEV_CONTROLLER) {
     // Query all controller info
-    this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_TYPE_M, RUN_GET));
-    this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_ALL, REG_MANUFACTURER, RUN_GET));
-    this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_ALL, REG_FIRMWARE, RUN_GET));
-    this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_ALL, REG_PRODUCT, RUN_GET));
-    this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_ALL, REG_HARDWARE, RUN_GET));
-    this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_ALL, REG_DESCRIPTION, RUN_GET));
-    this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_POS_MAX, RUN_GET));
-    this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_POS_MIN, RUN_GET));
-    this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_MAX_OPN, RUN_GET));
+    this->enqueue_tx_(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_TYPE_M, RUN_GET));
+    this->enqueue_tx_(t4_build_inf(addr, this->hub_address_, DEV_ALL, REG_MANUFACTURER, RUN_GET));
+    this->enqueue_tx_(t4_build_inf(addr, this->hub_address_, DEV_ALL, REG_FIRMWARE, RUN_GET));
+    this->enqueue_tx_(t4_build_inf(addr, this->hub_address_, DEV_ALL, REG_PRODUCT, RUN_GET));
+    this->enqueue_tx_(t4_build_inf(addr, this->hub_address_, DEV_ALL, REG_HARDWARE, RUN_GET));
+    this->enqueue_tx_(t4_build_inf(addr, this->hub_address_, DEV_ALL, REG_DESCRIPTION, RUN_GET));
+    this->enqueue_tx_(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_POS_MAX, RUN_GET));
+    this->enqueue_tx_(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_POS_MIN, RUN_GET));
+    this->enqueue_tx_(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_MAX_OPN, RUN_GET));
     this->request_position_();
-    this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_STATUS, RUN_GET));
-    this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_AUTOCLS, RUN_GET));
-    this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_PH_CLS_ON, RUN_GET));
-    this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_ALW_CLS_ON, RUN_GET));
+    this->enqueue_tx_(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_STATUS, RUN_GET));
+    this->enqueue_tx_(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_AUTOCLS, RUN_GET));
+    this->enqueue_tx_(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_PH_CLS_ON, RUN_GET));
+    this->enqueue_tx_(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_ALW_CLS_ON, RUN_GET));
     if (this->maneuver_count_sensor_ != nullptr) {
-      this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_TOTAL_COUNT, RUN_GET));
-      this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_NUM_MOVEMENTS, RUN_GET));
+      this->enqueue_tx_(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_TOTAL_COUNT, RUN_GET));
+      this->enqueue_tx_(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_NUM_MOVEMENTS, RUN_GET));
     }
-    this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_MAINT_COUNT, RUN_GET));
+    this->enqueue_tx_(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_MAINT_COUNT, RUN_GET));
     if (this->maintenance_threshold_sensor_ != nullptr)
-      this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_MAINT_THRESHOLD, RUN_GET));
-    this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_DIAG_IO, RUN_GET));
+      this->enqueue_tx_(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_MAINT_THRESHOLD, RUN_GET));
+    this->enqueue_tx_(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_DIAG_IO, RUN_GET));
     if (this->diag_par_text_sensor_ != nullptr)
-      this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_DIAG_PAR, RUN_GET));
+      this->enqueue_tx_(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_DIAG_PAR, RUN_GET));
     this->request_logical_inputs_();
-    this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_STANDBY_ACT, RUN_GET));
-    this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_BLINK_ON, RUN_GET));
-    this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_KEY_LOCK, RUN_GET));
-    this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_DIAG_BB, RUN_GET));
+    this->enqueue_tx_(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_STANDBY_ACT, RUN_GET));
+    this->enqueue_tx_(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_BLINK_ON, RUN_GET));
+    this->enqueue_tx_(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_KEY_LOCK, RUN_GET));
+    this->enqueue_tx_(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_DIAG_BB, RUN_GET));
     // Query all registered number registers at init
     for (auto *num : this->numbers_) {
       ESP_LOGI(TAG, "Querying number register 0x%02X at init", num->get_register_id());
-      this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, num->get_register_id(), RUN_GET));
+      this->enqueue_tx_(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, num->get_register_id(), RUN_GET));
     }
   } else if (device_type == DEV_RADIO) {
-    this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_ALL, REG_PRODUCT, RUN_GET));
-    this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_ALL, REG_HARDWARE, RUN_GET));
-    this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_ALL, REG_FIRMWARE, RUN_GET));
-    this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_ALL, REG_DESCRIPTION, RUN_GET));
+    this->enqueue_tx_(t4_build_inf(addr, this->hub_address_, DEV_ALL, REG_PRODUCT, RUN_GET));
+    this->enqueue_tx_(t4_build_inf(addr, this->hub_address_, DEV_ALL, REG_HARDWARE, RUN_GET));
+    this->enqueue_tx_(t4_build_inf(addr, this->hub_address_, DEV_ALL, REG_FIRMWARE, RUN_GET));
+    this->enqueue_tx_(t4_build_inf(addr, this->hub_address_, DEV_ALL, REG_DESCRIPTION, RUN_GET));
   }
 }
 
 void NiceBidiWiFi::request_position_() {
   auto pkt = t4_build_inf(this->device_address_, this->hub_address_,
                            DEV_CONTROLLER, REG_CUR_POS, RUN_GET);
-  this->tx_queue_.push(std::move(pkt));
+  this->enqueue_tx_(std::move(pkt));
 }
 
 void NiceBidiWiFi::request_status_refresh_() {
-  this->tx_queue_.push(t4_build_inf(this->device_address_, this->hub_address_,
-                                     DEV_CONTROLLER, REG_STATUS, RUN_GET));
+  this->enqueue_tx_(t4_build_inf(this->device_address_, this->hub_address_,
+                                  DEV_CONTROLLER, REG_STATUS, RUN_GET));
   if (this->maneuver_count_sensor_ != nullptr) {
     if (this->maneuver_total_count_unsupported_ && this->maneuver_num_movements_unsupported_) {
       // Neither B3 nor D4 — CL201-style; avoid polling a dead register every refresh
     } else {
       uint8_t reg = this->maneuver_total_count_unsupported_ ? REG_NUM_MOVEMENTS : REG_TOTAL_COUNT;
-      this->tx_queue_.push(
+      this->enqueue_tx_(
           t4_build_inf(this->device_address_, this->hub_address_, DEV_CONTROLLER, reg, RUN_GET));
     }
   }
 }
 
 void NiceBidiWiFi::request_io_state_() {
-  this->tx_queue_.push(t4_build_inf(this->device_address_, this->hub_address_,
-                                     DEV_CONTROLLER, REG_DIAG_IO, RUN_GET));
+  this->enqueue_tx_(t4_build_inf(this->device_address_, this->hub_address_,
+                                  DEV_CONTROLLER, REG_DIAG_IO, RUN_GET));
 }
 
 bool NiceBidiWiFi::any_logical_input_sensor_() const {
@@ -288,13 +309,13 @@ void NiceBidiWiFi::request_logical_inputs_() {
     return;
   T4Address addr = this->device_address_;
   if (this->input_1_sensor_ != nullptr)
-    this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_IN1, RUN_GET));
+    this->enqueue_tx_(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_IN1, RUN_GET));
   if (this->input_2_sensor_ != nullptr)
-    this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_IN2, RUN_GET));
+    this->enqueue_tx_(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_IN2, RUN_GET));
   if (this->input_3_sensor_ != nullptr && !this->input_3_unsupported_)
-    this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_IN3, RUN_GET));
+    this->enqueue_tx_(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_IN3, RUN_GET));
   if (this->input_4_sensor_ != nullptr && !this->input_4_unsupported_)
-    this->tx_queue_.push(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_IN4, RUN_GET));
+    this->enqueue_tx_(t4_build_inf(addr, this->hub_address_, DEV_CONTROLLER, REG_IN4, RUN_GET));
 }
 
 void NiceBidiWiFi::detect_device_type_() {
@@ -610,11 +631,6 @@ void NiceBidiWiFi::parse_packet_(const T4RxPacket &packet) {
   if (d.size() >= 14 && d[9] == DEV_RADIO) {
     this->parse_oxi_packet_(d);
   }
-
-  // Also check for RSP-style larger packets regardless of type
-  if (msg_type == MSG_INF && body_size > 0x0D) {
-    this->parse_rsp_packet_(d);
-  }
 }
 
 void NiceBidiWiFi::parse_evt_packet_(const std::vector<uint8_t> &d) {
@@ -628,7 +644,12 @@ void NiceBidiWiFi::parse_evt_packet_(const std::vector<uint8_t> &d) {
   uint8_t data_len = d[12];     // number of payload bytes starting at d[14]
   uint8_t next_data = d[13];    // next offset for continuation (non-zero = more data)
   std::string str_data;
-  if (d.size() > 16 && data_len > 0) {
+  const bool is_string_register =
+      device_type == DEV_ALL &&
+      (register_id == REG_MANUFACTURER || register_id == REG_PRODUCT ||
+       register_id == REG_HARDWARE || register_id == REG_FIRMWARE ||
+       register_id == REG_DESCRIPTION);
+  if (is_string_register && d.size() > 16 && data_len > 0) {
     size_t str_start = 14;
     size_t str_end = d.size() - 2;  // before crc2 and trailing size byte
     if (str_end > str_start) {
@@ -1051,6 +1072,7 @@ void NiceBidiWiFi::parse_rsp_packet_(const std::vector<uint8_t> &d) {
 
     if (old_state != this->operation_state_) {
       ESP_LOGI(TAG, "Movement: %s", t4_auto_status_name(this->operation_state_));
+      this->handle_movement_transition_(old_state, this->operation_state_);
       this->notify_state_change_();
     }
   }
@@ -1080,6 +1102,7 @@ void NiceBidiWiFi::parse_cmd_status_(const std::vector<uint8_t> &d) {
   }
 
   if (old_state != this->operation_state_) {
+    this->handle_movement_transition_(old_state, this->operation_state_);
     this->notify_state_change_();
   }
 }

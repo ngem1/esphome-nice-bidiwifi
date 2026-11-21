@@ -1,6 +1,6 @@
 #pragma once
 
-#include <queue>
+#include <deque>
 #include <vector>
 #include <string>
 #include <functional>
@@ -210,7 +210,7 @@ class NiceBidiWiFi : public Component {
   ESPPreferenceObject timing_pref_;
 
   // TX queue
-  std::queue<std::vector<uint8_t>> tx_queue_;
+  std::deque<std::vector<uint8_t>> tx_queue_;
 
   // Entity pointers
   NiceCover *cover_{nullptr};
@@ -257,6 +257,7 @@ class NiceBidiWiFi : public Component {
   };
 
   // Internal methods
+  void enqueue_tx_(std::vector<uint8_t> pkt, bool priority = false);
   void discover_devices_();
   uint32_t get_discovery_interval_() const;
   void init_device_(uint8_t addr1, uint8_t addr2, uint8_t device_type);

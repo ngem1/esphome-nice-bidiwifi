@@ -28,6 +28,10 @@ static const uint32_t T4_MAX_LEARNED_DURATION = 300000;  // 5 minutes
 static const float T4_LEARNING_DEVIATION = 0.10f;        // 10% threshold
 static const uint32_t T4_ENCODER_FRESH_MS = 2000;      // prefer encoder over time estimate
 
+// TX queue bounds
+static const size_t T4_TX_QUEUE_MAX = 64;              // hard cap to prevent unbounded heap growth
+static const size_t T4_TX_POLL_QUEUE_LIMIT = 8;        // skip periodic polls when queue is already busy
+
 // Protocol types
 enum T4Protocol : uint8_t {
   PROTO_DEP = 1,  // Simple command/response

@@ -24,7 +24,7 @@ api:
 
 ota:
   - platform: esphome
-    password: !secret ota_password
+    encryption:  # reuses api encryption key (migrating from password: requires 1 flash with password: first)
 
 wifi:
   ssid: !secret wifi_ssid
