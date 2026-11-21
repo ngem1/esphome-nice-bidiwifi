@@ -1,6 +1,7 @@
 #include "nice_cover.h"
 #include "t4_protocol.h"
 #include "esphome/core/log.h"
+#include <cinttypes>
 
 namespace esphome {
 namespace nice_bidiwifi {
@@ -17,9 +18,9 @@ void NiceCover::dump_config() {
   ESP_LOGCONFIG(TAG, "  Invert open/close: %s", this->invert_open_close_ ? "YES" : "NO");
   ESP_LOGCONFIG(TAG, "  Supports position: %s", this->supports_position_ ? "YES" : "NO");
   ESP_LOGCONFIG(TAG, "  Auto-learn timing: %s", this->auto_learn_timing_ ? "YES" : "NO");
-  ESP_LOGCONFIG(TAG, "  Default open duration: %u ms", this->open_duration_ms_);
-  ESP_LOGCONFIG(TAG, "  Default close duration: %u ms", this->close_duration_ms_);
-  ESP_LOGCONFIG(TAG, "  Position poll interval: %u ms", this->position_poll_interval_ms_);
+  ESP_LOGCONFIG(TAG, "  Default open duration: %" PRIu32 " ms", this->open_duration_ms_);
+  ESP_LOGCONFIG(TAG, "  Default close duration: %" PRIu32 " ms", this->close_duration_ms_);
+  ESP_LOGCONFIG(TAG, "  Position poll interval: %" PRIu32 " ms", this->position_poll_interval_ms_);
 }
 
 cover::CoverTraits NiceCover::get_traits() {

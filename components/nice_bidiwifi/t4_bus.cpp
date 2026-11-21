@@ -1,6 +1,8 @@
 #include "t4_bus.h"
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
+#include "esphome/core/version.h"
+#include <cinttypes>
 #include "driver/uart.h"
 #include "esp_timer.h"
 
@@ -23,7 +25,7 @@ void T4Bus::setup(int rx_pin, int tx_pin) {
   ESP_ERROR_CHECK(uart_set_pin(uart_port_, tx_pin, rx_pin, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
   ESP_ERROR_CHECK(uart_driver_install(uart_port_, 256, 0, 0, nullptr, 0));
 
-  ESP_LOGI(TAG, "UART%d initialized: RX=%d TX=%d @ %d baud", uart_port_, rx_pin, tx_pin, T4_BAUD_RATE);
+  ESP_LOGI(TAG, "UART%d initialized: RX=%d TX=%d @ %" PRIu32 " baud", uart_port_, rx_pin, tx_pin, T4_BAUD_RATE);
 }
 
 void T4Bus::reset_rx_() {
@@ -77,7 +79,16 @@ bool T4Bus::receive(T4RxPacket &packet) {
           if (validate_packet_()) {
             packet.data = rx_buffer_;
             packet.valid = true;
-            ESP_LOGV(TAG, "RX: %s", format_hex_pretty(rx_buffer_).c_str());
+#if ESPHOME_LOG_LEVEL >= ESPHOME_LOG_LEVEL_VERBOSE
+            {
+#if ESPHOME_VERSION_CODE >= VERSION_CODE(2026, 1, 0)
+              char hex_buf[3 * 132];
+              ESP_LOGV(TAG, "RX: %s", format_hex_pretty_to(hex_buf, sizeof(hex_buf), rx_buffer_.data(), rx_buffer_.size()));
+#else
+              ESP_LOGV(TAG, "RX: %s", format_hex_pretty(rx_buffer_).c_str());
+#endif
+            }
+#endif
             reset_rx_();
             return true;
           } else {
@@ -144,7 +155,16 @@ void T4Bus::send(const std::vector<uint8_t> &data) {
 
   last_tx_time_ = esp_timer_get_time() / 1000LL;  // convert us to ms
 
-  ESP_LOGV(TAG, "TX: %s", format_hex_pretty(data).c_str());
+#if ESPHOME_LOG_LEVEL >= ESPHOME_LOG_LEVEL_VERBOSE
+  {
+#if ESPHOME_VERSION_CODE >= VERSION_CODE(2026, 1, 0)
+    char hex_buf[3 * 132];
+    ESP_LOGV(TAG, "TX: %s", format_hex_pretty_to(hex_buf, sizeof(hex_buf), data.data(), data.size()));
+#else
+    ESP_LOGV(TAG, "TX: %s", format_hex_pretty(data).c_str());
+#endif
+  }
+#endif
 }
 
 bool T4Bus::ready_to_send() const {
